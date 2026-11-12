@@ -31,6 +31,7 @@ export QUEUE_CONNECTION=sync
 export APP_ENV=local
 export APP_DEBUG=true
 export APP_URL="http://127.0.0.1:${PORT:-25067}"
+export APP_FORCE_HTTPS=true
 
 if [[ ! -f "$LARAVEL_DIR/.env" ]]; then
   cp "$LARAVEL_DIR/.env.example" "$LARAVEL_DIR/.env"
@@ -74,6 +75,7 @@ mysql --no-defaults --protocol=socket --socket="$DB_SOCKET" -uroot \
 cd "$LARAVEL_DIR"
 php artisan config:clear >/dev/null
 php artisan migrate --force
-php artisan serve --host=0.0.0.0 --port="${PORT:-25067}" &
+# Laravel filters child-process environment variables unless --no-reload is set.
+php artisan serve --no-reload --host=0.0.0.0 --port="${PORT:-25067}" &
 APP_PID=$!
 wait "$APP_PID"

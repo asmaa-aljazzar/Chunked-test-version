@@ -24,6 +24,7 @@ export type AffectedTask = {
   priority: 'low' | 'medium' | 'high';
   completed: boolean;
 };
+type TaskMoveSuggestion = { chunkIndex: number; reason: string } | null;
 export type Task = {
   id: number | string;
   title: string;
@@ -99,6 +100,62 @@ function displayDate(date: string) {
 }
 function timeRange(chunk: Chunk) {
   return chunk.startTime && chunk.endTime ? `${chunk.startTime} – ${chunk.endTime}` : 'A little room';
+}
+function normalizedChunkName(name?: string | null) {
+  return (name ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+function dayPart(name?: string | null) {
+  const normalized = normalizedChunkName(name);
+  if (/\b(morning|dawn)\b/.test(normalized)) return 'morning';
+  if (/\b(afternoon|midday|noon)\b/.test(normalized)) return 'afternoon';
+  if (/\b(evening|night)\b/.test(normalized)) return 'evening';
+  return null;
+}
+function timeSegments(start: string, end: string): [number, number][] {
+  const toMinutes = (time: string) => {
+    const [hours, minutes] = time.split(':').map(Number);
+    return hours * 60 + minutes;
+  };
+  const startMinutes = toMinutes(start);
+  const endMinutes = toMinutes(end);
+  if (startMinutes === endMinutes) return [];
+  return endMinutes > startMinutes
+    ? [[startMinutes, endMinutes]]
+    : [[startMinutes, 1440], [0, endMinutes]];
+}
+function timeOverlapMinutes(oldStart: string, oldEnd: string, newStart: string, newEnd: string) {
+  const oldSegments = timeSegments(oldStart, oldEnd);
+  const newSegments = timeSegments(newStart, newEnd);
+  return oldSegments.reduce((total, [oldFrom, oldTo]) => total + newSegments.reduce((subtotal, [newFrom, newTo]) => (
+    subtotal + Math.max(0, Math.min(oldTo, newTo) - Math.max(oldFrom, newFrom))
+  ), 0), 0);
+}
+function suggestTaskDestination(task: AffectedTask, chunks: { name: string; startTime?: string; endTime?: string }[]): TaskMoveSuggestion {
+  const oldName = normalizedChunkName(task.chunkName);
+  const sameName = chunks.map((chunk, index) => ({ chunk, index })).filter(({ chunk }) => normalizedChunkName(chunk.name) === oldName);
+  if (oldName && sameName.length === 1) return { chunkIndex: sameName[0].index, reason: 'same block name' };
+  if (oldName) {
+    const oldPart = dayPart(task.chunkName);
+    const samePart = chunks.map((chunk, index) => ({ chunk, index })).filter(({ chunk }) => oldPart !== null && dayPart(chunk.name) === oldPart);
+    if (samePart.length === 1) return { chunkIndex: samePart[0].index, reason: 'same part of day' };
+  }
+  if (!task.chunkStartTime || !task.chunkEndTime) return null;
+
+  let bestIndex = -1;
+  let bestOverlap = 0;
+  let tied = false;
+  chunks.forEach((chunk, index) => {
+    if (!chunk.startTime || !chunk.endTime) return;
+    const overlap = timeOverlapMinutes(task.chunkStartTime!, task.chunkEndTime!, chunk.startTime, chunk.endTime);
+    if (overlap > bestOverlap) {
+      bestIndex = index;
+      bestOverlap = overlap;
+      tied = false;
+    } else if (overlap > 0 && overlap === bestOverlap) {
+      tied = true;
+    }
+  });
+  return bestOverlap > 0 && !tied ? { chunkIndex: bestIndex, reason: 'overlapping times' } : null;
 }
 const PageContext = createContext<ChunkedPageProps>({});
 function useChunkedPage() { return useContext(PageContext); }
@@ -479,6 +536,8 @@ function OnboardingPage() {
   const [setupError, setSetupError] = useState('');
   const [showTaskConfirmation, setShowTaskConfirmation] = useState(false);
   const [savingStructure, setSavingStructure] = useState(false);
+  const [taskChoices, setTaskChoices] = useState<Record<number, string>>({});
+  const [taskSuggestions, setTaskSuggestions] = useState<Record<number, TaskMoveSuggestion>>({});
   const [chunkTimes, setChunkTimes] = useState(() => props.current?.chunks?.map((chunk) => ({
     startTime: chunk.startTime || '',
     endTime: chunk.endTime || '',
@@ -520,7 +579,7 @@ function OnboardingPage() {
       || (chunk.endTime || '') !== (chunkTimes[index]?.endTime || '')
     ));
   };
-  const submitStructure = (taskAction?: 'delete' | 'move_by_time') => {
+  const submitStructure = (taskDecisions?: { taskId: number; action: 'move' | 'unassigned' | 'delete'; chunkIndex?: number }[]) => {
     const structure = { type: form.data.type, name: form.data.name, chunks: form.data.chunks };
     const settings = { navigationPosition: navigation, theme, language };
     if (form.data.chunks.length === 0 || form.data.chunks.some((chunk) => !chunk.trim())) {
@@ -532,7 +591,7 @@ function OnboardingPage() {
       ...structure,
       chunkTimes,
       settings,
-      ...(taskAction ? { taskAction } : {}),
+      ...(taskDecisions ? { taskDecisions } : {}),
     }, {
       onStart: () => setSavingStructure(true),
       onFinish: () => setSavingStructure(false),
@@ -540,14 +599,57 @@ function OnboardingPage() {
     });
     else window.location.href = props.routes?.day || '/day';
   };
+  const prepareTaskReview = () => {
+    const affectedTasks = props.affectedTasks ?? [];
+    const draftChunks = form.data.chunks.map((name, index) => ({
+      name: name.trim(),
+      startTime: chunkTimes[index]?.startTime || '',
+      endTime: chunkTimes[index]?.endTime || '',
+    }));
+    const suggestions = Object.fromEntries(affectedTasks.map((task) => [
+      task.id,
+      suggestTaskDestination(task, draftChunks),
+    ])) as Record<number, TaskMoveSuggestion>;
+    const choices = Object.fromEntries(affectedTasks.map((task) => [task.id, ''])) as Record<number, string>;
+    setTaskSuggestions(suggestions);
+    setTaskChoices(choices);
+    setSetupError('');
+    setShowTaskConfirmation(true);
+  };
+  const applyTaskChoices = () => {
+    const decisions: { taskId: number; action: 'move' | 'unassigned' | 'delete'; chunkIndex?: number }[] = [];
+    for (const task of props.affectedTasks ?? []) {
+      const choice = taskChoices[task.id];
+      if (!choice) {
+        setSetupError('Choose a destination or action for every task before continuing.');
+        return;
+      }
+      if (choice === 'delete') {
+        decisions.push({ taskId: task.id, action: 'delete' });
+      } else if (choice === 'unassigned') {
+        decisions.push({ taskId: task.id, action: 'unassigned' });
+      } else if (choice.startsWith('move:')) {
+        const chunkIndex = Number(choice.slice('move:'.length));
+        if (!Number.isInteger(chunkIndex) || chunkIndex < 0 || chunkIndex >= form.data.chunks.length) {
+          setSetupError('Choose a valid destination for every task.');
+          return;
+        }
+        decisions.push({ taskId: task.id, action: 'move', chunkIndex });
+      } else {
+        setSetupError('Choose a destination or action for every task before continuing.');
+        return;
+      }
+    }
+    setSetupError('');
+    submitStructure(decisions);
+  };
   const finish = () => {
     if (form.data.chunks.length === 0 || form.data.chunks.some((chunk) => !chunk.trim())) {
       setSetupError('Give every part of your day a name, or remove the empty part.');
       return;
     }
     if (props.current && rhythmHasChanged() && (props.affectedTasks?.length ?? 0) > 0) {
-      setSetupError('');
-      setShowTaskConfirmation(true);
+      prepareTaskReview();
       return;
     }
     submitStructure();
@@ -577,7 +679,7 @@ function OnboardingPage() {
           {setupError && <p role="alert" className="mt-4 rounded-xl bg-[#f5e8e3] px-3 py-2 text-[11px] text-[#984e42]">{setupError}</p>}
           <details className="mt-5 rounded-xl border border-soft p-3">
             <summary className="cursor-pointer text-[10px] font-semibold">Optional times · help place existing tasks</summary>
-            <p className="mb-3 mt-2 text-[10px] leading-4 text-muted">When changing your rhythm, clear time overlaps can move tasks to a matching block.</p>
+            <p className="mb-3 mt-2 text-[10px] leading-4 text-muted">Matching block names or day parts can suggest a destination; times are an optional extra hint.</p>
             <div className="space-y-2">{form.data.chunks.map((chunk, index) => <div key={`time-${index}`} className="flex items-center gap-2">
               <span className="min-w-0 flex-1 truncate text-[10px] text-muted">{chunk || `Part ${index + 1}`}</span>
               <input type="time" aria-label={`${chunk || `Part ${index + 1}`} start time`} value={chunkTimes[index]?.startTime || ''} onChange={(event) => setChunkTimes((current) => current.map((times, i) => i === index ? { ...(times ?? { startTime: '', endTime: '' }), startTime: event.target.value } : times))} className="h-8 w-[96px] rounded-lg border border-soft bg-[hsl(var(--background))] px-2 text-[10px]" />
@@ -590,18 +692,31 @@ function OnboardingPage() {
         </aside>
       </div>
     </main>
-    {showTaskConfirmation && <Overlay title="Tasks are in these chunks" eyebrow="Before your rhythm changes" onClose={() => setShowTaskConfirmation(false)}>
-      <p className="mt-4 text-xs leading-5 text-muted">This change affects {props.affectedTasks?.length ?? 0} tasks across their planned days. Choose what to do before saving the new rhythm.</p>
-      <p className="mb-0 text-[11px] leading-5 text-muted">Moving uses the greatest overlap between old and new block times. Tasks without a clear, unique time match stay unassigned.</p>
-      <div className="mt-4 max-h-[30vh] space-y-2 overflow-y-auto rounded-xl border border-soft p-2">
-        {(props.affectedTasks ?? []).map((task) => <div key={task.id} className="flex items-start justify-between gap-3 rounded-lg px-2 py-2">
-          <div className="min-w-0"><div className="truncate text-xs font-medium">{task.title}</div><div className="mt-1 text-[10px] text-muted">{displayDate(task.plannedDate)}{task.chunkName ? ` · ${task.chunkName}` : ''}{task.completed ? ' · completed' : ''}</div></div>
-          <span className="shrink-0 rounded-full bg-[hsl(var(--muted))] px-2 py-1 text-[9px] text-muted">{task.priority}</span>
-        </div>)}
+    {showTaskConfirmation && <Overlay title="Review task destinations" eyebrow="Before your rhythm changes" onClose={() => setShowTaskConfirmation(false)}>
+      <p className="mt-4 text-xs leading-5 text-muted">Review the suggestion for each task, then select a destination or action for that task. Nothing changes until you confirm below.</p>
+      {setupError && <p role="alert" className="mt-3 rounded-xl bg-[#f5e8e3] px-3 py-2 text-[11px] text-[#984e42]">{setupError}</p>}
+      <div className="mt-4 max-h-[40vh] space-y-3 overflow-y-auto rounded-xl border border-soft p-2">
+        {(props.affectedTasks ?? []).map((task) => {
+          const suggestion = taskSuggestions[task.id];
+          return <div key={task.id} className="rounded-xl bg-[hsl(var(--muted)/.55)] p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0"><div className="truncate text-xs font-medium">{task.title}</div><div className="mt-1 text-[10px] text-muted">{displayDate(task.plannedDate)}{task.chunkName ? ` · from ${task.chunkName}` : ''}{task.completed ? ' · completed' : ''}</div></div>
+              <span className="shrink-0 rounded-full bg-white/70 px-2 py-1 text-[9px] text-muted">{task.priority}</span>
+            </div>
+            <label className="mt-3 block text-[10px] font-semibold">
+              {suggestion ? `Suggested: ${form.data.chunks[suggestion.chunkIndex]} · ${suggestion.reason}` : 'No clear match · choose what happens'}
+              <select aria-label={`Destination or action for ${task.title}`} value={taskChoices[task.id] ?? ''} onChange={(event) => setTaskChoices((current) => ({ ...current, [task.id]: event.target.value }))} className="mt-1.5 h-10 w-full rounded-lg border border-soft bg-[hsl(var(--background))] px-3 text-xs font-normal">
+                <option value="">{suggestion ? 'Select to confirm or choose another action' : 'Choose a destination or action'}</option>
+                {form.data.chunks.map((chunk, index) => <option key={`${chunk}-${index}`} value={`move:${index}`}>{suggestion?.chunkIndex === index ? `Move to ${chunk} · suggested` : `Move to ${chunk}`}</option>)}
+                <option value="unassigned">Leave unassigned</option>
+                <option value="delete">Delete this task</option>
+              </select>
+            </label>
+          </div>;
+        })}
       </div>
       <div className="mt-5 grid gap-2 sm:grid-cols-2">
-        <button type="button" disabled={savingStructure} onClick={() => submitStructure('move_by_time')} className="rounded-xl bg-[hsl(var(--primary))] px-4 py-3 text-xs font-semibold text-[hsl(var(--primary-foreground))] disabled:opacity-60">Move where times overlap</button>
-        <button type="button" disabled={savingStructure} onClick={() => submitStructure('delete')} className="rounded-xl border border-[#d7b7ac] px-4 py-3 text-xs font-semibold text-[#9a5144] disabled:opacity-60">Delete affected tasks</button>
+        <button type="button" disabled={savingStructure || (props.affectedTasks ?? []).some((task) => !taskChoices[task.id])} onClick={applyTaskChoices} className="rounded-xl bg-[hsl(var(--primary))] px-4 py-3 text-xs font-semibold text-[hsl(var(--primary-foreground))] disabled:opacity-50 sm:col-span-2">{savingStructure ? 'Saving…' : 'Confirm choices and save rhythm'}</button>
         <button type="button" disabled={savingStructure} onClick={() => setShowTaskConfirmation(false)} className="rounded-xl px-4 py-3 text-xs text-muted hover:bg-[hsl(var(--muted))] sm:col-span-2">Cancel rhythm change</button>
       </div>
     </Overlay>}

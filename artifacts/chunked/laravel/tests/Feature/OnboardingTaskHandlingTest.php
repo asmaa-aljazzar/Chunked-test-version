@@ -23,7 +23,7 @@ class OnboardingTaskHandlingTest extends TestCase
         $this->post(route('onboarding.store'), $this->rhythmPayload([
             ['name' => 'Early', 'startTime' => '08:00', 'endTime' => '10:00'],
             ['name' => 'Late', 'startTime' => '10:00', 'endTime' => '12:00'],
-        ]))->assertSessionHasErrors('taskAction');
+        ]))->assertSessionHasErrors('taskDecisions');
 
         $this->assertDatabaseHas('chunks', [
             'id' => $oldChunks->first()->id,
@@ -36,7 +36,7 @@ class OnboardingTaskHandlingTest extends TestCase
         ]);
     }
 
-    public function test_time_move_uses_the_greatest_overlap_and_leaves_unmatched_tasks_unassigned(): void
+    public function test_each_task_can_be_moved_to_a_confirmed_destination_or_left_unassigned(): void
     {
         $user = User::factory()->create();
         $this->actingAs($user);
@@ -54,7 +54,11 @@ class OnboardingTaskHandlingTest extends TestCase
                 ['name' => 'First part', 'startTime' => '08:00', 'endTime' => '11:00'],
                 ['name' => 'Second part', 'startTime' => '11:00', 'endTime' => '17:00'],
             ]),
-            'taskAction' => 'move_by_time',
+            'taskDecisions' => [
+                ['taskId' => $morningTask->id, 'action' => 'move', 'chunkIndex' => 0],
+                ['taskId' => $afternoonTask->id, 'action' => 'move', 'chunkIndex' => 1],
+                ['taskId' => $unmatchedTask->id, 'action' => 'unassigned'],
+            ],
         ])->assertRedirect(route('day.index'));
 
         $newChunks = $user->fresh()->dayStructure->chunks()->get()->keyBy('name');
@@ -89,13 +93,15 @@ class OnboardingTaskHandlingTest extends TestCase
                 ['name' => 'First part', 'startTime' => '08:00', 'endTime' => '11:00'],
                 ['name' => 'Second part', 'startTime' => '11:00', 'endTime' => '17:00'],
             ]),
-            'taskAction' => 'delete',
+            'taskDecisions' => [
+                ['taskId' => $task->id, 'action' => 'delete'],
+            ],
         ])->assertRedirect(route('day.index'));
 
         $this->assertSoftDeleted('tasks', ['id' => $task->id]);
     }
 
-    public function test_time_move_leaves_a_task_unassigned_when_new_chunks_tie(): void
+    public function test_a_move_cannot_target_a_chunk_that_is_not_in_the_new_rhythm(): void
     {
         $user = User::factory()->create();
         $this->actingAs($user);
@@ -109,12 +115,14 @@ class OnboardingTaskHandlingTest extends TestCase
                 ['name' => 'First part', 'startTime' => '08:00', 'endTime' => '10:00'],
                 ['name' => 'Second part', 'startTime' => '10:00', 'endTime' => '12:00'],
             ]),
-            'taskAction' => 'move_by_time',
-        ])->assertRedirect(route('day.index'));
+            'taskDecisions' => [
+                ['taskId' => $task->id, 'action' => 'move', 'chunkIndex' => 8],
+            ],
+        ])->assertSessionHasErrors('taskDecisions');
 
         $this->assertDatabaseHas('tasks', [
             'id' => $task->id,
-            'chunk_id' => null,
+            'chunk_id' => $oldChunks->first()->id,
             'chunk_name_snapshot' => 'Morning',
         ]);
     }

@@ -114,7 +114,10 @@ class OnboardingController extends Controller
             'chunkTimes' => ['nullable', 'array', 'max:12'],
             'chunkTimes.*.startTime' => ['nullable', 'date_format:H:i'],
             'chunkTimes.*.endTime' => ['nullable', 'date_format:H:i'],
-            'taskAction' => ['nullable', 'in:delete,move_by_time'],
+            'taskDecisions' => ['nullable', 'array', 'max:500'],
+            'taskDecisions.*.taskId' => ['required', 'integer', 'distinct'],
+            'taskDecisions.*.action' => ['required', 'in:move,unassigned,delete'],
+            'taskDecisions.*.chunkIndex' => ['nullable', 'integer', 'min:0', 'max:11'],
             'settings' => ['nullable', 'array'],
             'settings.theme' => ['nullable', 'in:light,dark,system'],
             'settings.language' => ['nullable', 'in:en,ar'],
@@ -156,7 +159,6 @@ class OnboardingController extends Controller
 
             $activeChunks = $structure->chunks()->orderBy('sort_order')->lockForUpdate()->get();
             $chunksChanged = $this->chunkConfigurationChanged($activeChunks, $chunks);
-            $taskAction = $validated['taskAction'] ?? null;
             $affectedTasks = $chunksChanged && $activeChunks->isNotEmpty()
                 ? $user->tasks()
                     ->whereIn('chunk_id', $activeChunks->modelKeys())
@@ -164,15 +166,30 @@ class OnboardingController extends Controller
                     ->lockForUpdate()
                     ->get()
                 : collect();
+            $decisions = collect($validated['taskDecisions'] ?? [])
+                ->keyBy(fn ($decision) => (int) $decision['taskId']);
 
-            if ($affectedTasks->isNotEmpty() && ! in_array($taskAction, ['delete', 'move_by_time'], true)) {
+            if ($affectedTasks->isNotEmpty()) {
+                $expectedTaskIds = $affectedTasks->modelKeys();
+                $submittedTaskIds = $decisions->keys()->map(fn ($id) => (int) $id)->all();
+                sort($expectedTaskIds);
+                sort($submittedTaskIds);
+                $hasInvalidDestination = $decisions->contains(fn ($decision) => (
+                    $decision['action'] === 'move'
+                    && (
+                        ! isset($decision['chunkIndex'])
+                        || $decision['chunkIndex'] >= count($chunks)
+                    )
+                ));
+
+                if ($expectedTaskIds !== $submittedTaskIds || $hasInvalidDestination) {
                 throw ValidationException::withMessages([
-                    'taskAction' => 'Choose whether to delete affected tasks or move them by time before changing your rhythm.',
+                        'taskDecisions' => 'Choose an action and destination for every affected task before changing your rhythm.',
                 ]);
+                }
             }
 
             $outcome = [
-                'action' => $taskAction,
                 'affected' => $affectedTasks->count(),
                 'moved' => 0,
                 'unassigned' => 0,
@@ -181,11 +198,6 @@ class OnboardingController extends Controller
 
             if ($chunksChanged) {
                 $oldChunksById = $activeChunks->keyBy('id');
-                if ($taskAction === 'delete') {
-                    $affectedTasks->each(fn ($task) => $task->delete());
-                    $outcome['deleted'] = $affectedTasks->count();
-                }
-
                 $activeChunks->each->delete();
                 $newChunks = collect();
                 foreach (array_values($chunks) as $index => $chunk) {
@@ -197,15 +209,26 @@ class OnboardingController extends Controller
                     ]));
                 }
 
-                if ($taskAction === 'move_by_time') {
-                    foreach ($affectedTasks as $task) {
-                        $oldChunk = $oldChunksById->get($task->chunk_id);
-                        $newChunk = $this->bestTimeMatch($oldChunk, $newChunks);
+                foreach ($affectedTasks as $task) {
+                    $decision = $decisions->get((int) $task->id);
+                    $oldChunk = $oldChunksById->get($task->chunk_id);
+
+                    if ($decision['action'] === 'delete') {
+                        $task->delete();
+                        $outcome['deleted']++;
+                    } elseif ($decision['action'] === 'unassigned') {
                         $task->update([
-                            'chunk_id' => $newChunk?->id,
-                            'chunk_name_snapshot' => $newChunk?->name ?? $oldChunk?->name ?? $task->chunk_name_snapshot,
+                            'chunk_id' => null,
+                            'chunk_name_snapshot' => $oldChunk?->name ?? $task->chunk_name_snapshot,
                         ]);
-                        $outcome[$newChunk ? 'moved' : 'unassigned']++;
+                        $outcome['unassigned']++;
+                    } else {
+                        $newChunk = $newChunks->get((int) $decision['chunkIndex']);
+                        $task->update([
+                            'chunk_id' => $newChunk->id,
+                            'chunk_name_snapshot' => $newChunk->name,
+                        ]);
+                        $outcome['moved']++;
                     }
                 }
             }
@@ -222,10 +245,8 @@ class OnboardingController extends Controller
         });
 
         $message = 'Your day is ready. You can change it any time.';
-        if ($taskOutcome['deleted'] > 0) {
-            $message = "Your rhythm is updated. {$taskOutcome['deleted']} tasks were deleted.";
-        } elseif ($taskOutcome['action'] === 'move_by_time' && $taskOutcome['affected'] > 0) {
-            $message = "Your rhythm is updated. {$taskOutcome['moved']} tasks moved by time; {$taskOutcome['unassigned']} stayed unassigned because there was no clear time match.";
+        if ($taskOutcome['affected'] > 0) {
+            $message = "Rhythm updated: {$taskOutcome['moved']} moved, {$taskOutcome['deleted']} deleted, and {$taskOutcome['unassigned']} left unassigned.";
         }
 
         return redirect()->route('day.index')->with('success', $message);
@@ -276,76 +297,6 @@ class OnboardingController extends Controller
         }
 
         return false;
-    }
-
-    private function bestTimeMatch(?Chunk $oldChunk, $newChunks): ?Chunk
-    {
-        if (! $oldChunk || ! $oldChunk->start_time || ! $oldChunk->end_time) {
-            return null;
-        }
-
-        $bestChunk = null;
-        $bestOverlap = 0;
-        $tied = false;
-
-        foreach ($newChunks as $newChunk) {
-            if (! $newChunk->start_time || ! $newChunk->end_time) {
-                continue;
-            }
-
-            $overlap = $this->overlapMinutes(
-                (string) $oldChunk->start_time,
-                (string) $oldChunk->end_time,
-                (string) $newChunk->start_time,
-                (string) $newChunk->end_time,
-            );
-
-            if ($overlap > $bestOverlap) {
-                $bestChunk = $newChunk;
-                $bestOverlap = $overlap;
-                $tied = false;
-            } elseif ($overlap > 0 && $overlap === $bestOverlap) {
-                $tied = true;
-            }
-        }
-
-        return $bestOverlap > 0 && ! $tied ? $bestChunk : null;
-    }
-
-    private function overlapMinutes(string $firstStart, string $firstEnd, string $secondStart, string $secondEnd): int
-    {
-        $firstSegments = $this->timeSegments($firstStart, $firstEnd);
-        $secondSegments = $this->timeSegments($secondStart, $secondEnd);
-        $overlap = 0;
-
-        foreach ($firstSegments as [$firstSegmentStart, $firstSegmentEnd]) {
-            foreach ($secondSegments as [$secondSegmentStart, $secondSegmentEnd]) {
-                $overlap += max(0, min($firstSegmentEnd, $secondSegmentEnd) - max($firstSegmentStart, $secondSegmentStart));
-            }
-        }
-
-        return $overlap;
-    }
-
-    private function timeSegments(string $start, string $end): array
-    {
-        $start = $this->minutesAfterMidnight($start);
-        $end = $this->minutesAfterMidnight($end);
-
-        if ($start === $end) {
-            return [];
-        }
-
-        return $end > $start
-            ? [[$start, $end]]
-            : [[$start, 1440], [0, $end]];
-    }
-
-    private function minutesAfterMidnight(string $time): int
-    {
-        [$hours, $minutes] = array_map('intval', explode(':', substr($time, 0, 5)));
-
-        return ($hours * 60) + $minutes;
     }
 
     private function normalizeTime(?string $time): ?string

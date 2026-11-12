@@ -1,0 +1,311 @@
+// DRAFT FOR DISCOVERY. Not an approved migration. Read 08-ERD-REVIEW-NOTES.md.
+// Sessions belong to chunks, not focus_choices. Nullability is explicit via not null.
+// Suggested sizes/defaults are reviewable, not additional founder requirements.
+
+Enum user_role {
+  user
+  admin
+}
+
+Enum interface_language {
+  auto
+  ar
+  en
+}
+
+Enum navigation_position {
+  sidebar
+  topbar
+}
+
+Enum day_structure_type {
+  prayer
+  time_of_day
+  work
+  school
+  custom
+}
+
+Enum task_priority {
+  low
+  medium
+  high
+}
+
+Enum goal_status {
+  active
+  paused
+  completed
+  archived
+}
+
+Enum focus_status {
+  active
+  paused
+  completed
+}
+
+Enum readiness_status {
+  ready
+  prepare
+  blocked
+}
+
+Enum session_type {
+  study
+  work
+}
+
+Enum message_role {
+  user
+  assistant
+}
+
+Enum billing_interval {
+  none
+  month
+  year
+}
+
+Enum subscription_status {
+  pending
+  active
+  past_due
+  canceled
+  expired
+}
+
+Enum transaction_status {
+  pending
+  succeeded
+  failed
+  refunded
+}
+
+Enum payment_provider {
+  demo
+  stripe
+}
+
+Table users {
+  id bigint [pk, increment]
+  name varchar(255) [not null]
+  email varchar(255) [not null, unique]
+  email_verified_at timestamp
+  password varchar(255) [not null, note: 'Password hash only']
+  role user_role [not null, default: 'user']
+  remember_token varchar(100)
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+}
+
+Table user_settings {
+  user_id bigint [pk, ref: - users.id]
+  theme_id bigint [ref: > themes.id]
+  language interface_language [not null, default: 'auto']
+  timezone varchar(80) [not null, default: 'Asia/Amman']
+  navigation_position navigation_position [not null, default: 'sidebar']
+  ai_enabled boolean [not null, default: true]
+  ai_voice_enabled boolean [not null, default: false]
+  reduced_motion boolean [not null, default: false]
+  onboarded_at timestamp
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+}
+
+Table day_structures {
+  id bigint [pk, increment]
+  user_id bigint [not null, unique, ref: - users.id]
+  type day_structure_type [not null]
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+}
+
+Table chunks {
+  id bigint [pk, increment]
+  day_structure_id bigint [not null, ref: > day_structures.id]
+  name varchar(120) [not null]
+  prayer_key varchar(30)
+  start_time time
+  end_time time
+  sort_order integer [not null, default: 0]
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+}
+
+Table tasks {
+  id bigint [pk, increment]
+  user_id bigint [not null, ref: > users.id]
+  chunk_id bigint [ref: > chunks.id]
+  goal_id bigint [ref: > goals.id]
+  title varchar(200) [not null]
+  description text
+  planned_date date [not null]
+  priority task_priority [not null, default: 'medium']
+  completed_at timestamp
+  sort_order integer [not null, default: 0]
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+}
+
+Table goals {
+  id bigint [pk, increment]
+  user_id bigint [not null, ref: > users.id]
+  title varchar(200) [not null]
+  description text
+  target_date date
+  status goal_status [not null, default: 'active']
+  completed_at timestamp
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+}
+
+Table habits {
+  id bigint [pk, increment]
+  user_id bigint [not null, ref: > users.id]
+  goal_id bigint [ref: > goals.id]
+  name varchar(160) [not null]
+  schedule_days json [not null, note: 'Weekday array; define encoding consistently']
+  start_date date [not null]
+  archived_at timestamp
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+}
+
+Table habit_logs {
+  id bigint [pk, increment]
+  habit_id bigint [not null, ref: > habits.id]
+  date date [not null]
+  completed_at timestamp [not null]
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+
+  indexes {
+    (habit_id, date) [unique]
+  }
+}
+
+Table focus_choices {
+  id bigint [pk, increment]
+  user_id bigint [not null, ref: > users.id]
+  goal_id bigint [ref: > goals.id]
+  title varchar(200) [not null]
+  description text
+  next_step text
+  status focus_status [not null, default: 'paused']
+  completed_at timestamp
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+
+  Note: 'At most one active per user; requires concurrency-safe backend enforcement.'
+}
+
+Table focus_checkins {
+  id bigint [pk, increment]
+  focus_choice_id bigint [not null, ref: > focus_choices.id]
+  readiness readiness_status [not null]
+  note text
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+
+  Note: 'Optional history design. Remove if current readiness belongs on focus_choices instead.'
+}
+
+Table focus_sessions {
+  id bigint [pk, increment]
+  user_id bigint [not null, ref: > users.id]
+  chunk_id bigint [not null, ref: > chunks.id]
+  type session_type [not null]
+  started_at timestamp [not null]
+  ended_at timestamp
+  duration_seconds integer [not null, default: 0, note: 'Proposed active time excluding pauses; completion rules unresolved']
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+}
+
+Table reflections {
+  id bigint [pk, increment]
+  user_id bigint [not null, ref: > users.id]
+  date date [not null]
+  content text [not null]
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+}
+
+Table onboarding_answers {
+  id bigint [pk, increment]
+  user_id bigint [not null, ref: > users.id]
+  question_key varchar(80) [not null]
+  answer json [not null]
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+
+  indexes {
+    (user_id, question_key) [unique]
+  }
+}
+
+Table ai_conversations {
+  id bigint [pk, increment]
+  user_id bigint [not null, ref: > users.id]
+  reflection_id bigint [ref: > reflections.id]
+  title varchar(200)
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+}
+
+Table ai_messages {
+  id bigint [pk, increment]
+  ai_conversation_id bigint [not null, ref: > ai_conversations.id]
+  role message_role [not null]
+  content text [not null]
+  created_at timestamp [not null]
+}
+
+Table themes {
+  id bigint [pk, increment]
+  key varchar(60) [not null, unique]
+  name varchar(100) [not null]
+  is_premium boolean [not null, default: false]
+}
+
+Table plans {
+  id bigint [pk, increment]
+  name varchar(100) [not null]
+  price decimal(10,2) [not null]
+  currency char(3) [not null]
+  billing_interval billing_interval [not null]
+  is_active boolean [not null, default: true]
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+}
+
+Table subscriptions {
+  id bigint [pk, increment]
+  user_id bigint [not null, ref: > users.id]
+  plan_id bigint [not null, ref: > plans.id]
+  status subscription_status [not null, default: 'pending']
+  starts_at timestamp
+  ends_at timestamp
+  canceled_at timestamp
+  provider_subscription_id varchar(255) [unique]
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+
+  Note: 'At most one active per user. Provider billing details require further design.'
+}
+
+Table transactions {
+  id bigint [pk, increment]
+  subscription_id bigint [not null, ref: > subscriptions.id]
+  amount decimal(10,2) [not null]
+  currency char(3) [not null]
+  status transaction_status [not null, default: 'pending']
+  provider payment_provider [not null]
+  provider_payment_id varchar(255) [unique]
+  paid_at timestamp
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+}
+
+

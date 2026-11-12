@@ -1,0 +1,19 @@
+kind = "web"
+previewPath = "/"
+title = "Chunked"
+description = "A calm day-planning app that helps people organize flexible day rhythms, focus on one chunk at a time, and manage unfinished tasks without guilt."
+version = "1.0.0"
+id = "artifacts/chunked"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 25067
+
+[services.development]
+run = "pnpm --filter @workspace/chunked run dev"
+
+[services.env]
+PORT = "25067"
+BASE_PATH = "/"

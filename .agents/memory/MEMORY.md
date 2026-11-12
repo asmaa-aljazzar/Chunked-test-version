@@ -1,0 +1,1 @@
+- [Task history across day changes](task-history-across-day-changes.md) — preserve old task placement meaning when recurring chunks change.

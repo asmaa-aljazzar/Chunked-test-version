@@ -6,6 +6,7 @@ use App\Models\Chunk;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -55,6 +56,27 @@ class OnboardingController extends Controller
             ->with(['chunks' => fn ($query) => $query->orderBy('sort_order')])
             ->first();
         $settings = $request->user()->settings;
+        $activeChunks = $structure?->chunks ?? collect();
+        $chunkById = $activeChunks->keyBy('id');
+        $affectedTasks = $chunkById->isEmpty()
+            ? []
+            : $request->user()->tasks()
+                ->whereIn('chunk_id', $chunkById->keys())
+                ->with('chunk')
+                ->orderBy('planned_date')
+                ->orderBy('sort_order')
+                ->get()
+                ->map(fn ($task) => [
+                    'id' => $task->id,
+                    'title' => $task->title,
+                    'plannedDate' => $task->planned_date->toDateString(),
+                    'chunkName' => $task->chunk?->name ?? $task->chunk_name_snapshot,
+                    'chunkStartTime' => $task->chunk?->start_time ? substr((string) $task->chunk->start_time, 0, 5) : null,
+                    'chunkEndTime' => $task->chunk?->end_time ? substr((string) $task->chunk->end_time, 0, 5) : null,
+                    'priority' => $task->priority,
+                    'completed' => $task->completed_at !== null,
+                ])
+                ->all();
 
         return Inertia::render('App', [
             'current' => $structure ? [
@@ -73,6 +95,7 @@ class OnboardingController extends Controller
                 'navigationPosition' => $settings?->navigation_position ?? 'sidebar',
                 'timezone' => $settings?->timezone ?? 'Asia/Amman',
             ],
+            'affectedTasks' => $affectedTasks,
             'themes' => [
                 ['key' => 'soft-sage', 'name' => 'Soft sage'],
                 ['key' => 'warm-sunrise', 'name' => 'Warm sunrise'],
@@ -91,6 +114,7 @@ class OnboardingController extends Controller
             'chunkTimes' => ['nullable', 'array', 'max:12'],
             'chunkTimes.*.startTime' => ['nullable', 'date_format:H:i'],
             'chunkTimes.*.endTime' => ['nullable', 'date_format:H:i'],
+            'taskAction' => ['nullable', 'in:delete,move_by_time'],
             'settings' => ['nullable', 'array'],
             'settings.theme' => ['nullable', 'in:light,dark,system'],
             'settings.language' => ['nullable', 'in:en,ar'],
@@ -116,21 +140,74 @@ class OnboardingController extends Controller
             $chunks = self::TEMPLATES[$type];
         }
 
-        DB::transaction(function () use ($request, $validated, $chunks, $type) {
+        $taskOutcome = DB::transaction(function () use ($request, $validated, $chunks, $type) {
             $user = $request->user();
-            $structure = $user->dayStructure()->updateOrCreate([], [
+            $structure = $user->dayStructure()->first();
+            $structureAttributes = [
                 'type' => $type,
                 'name' => $validated['name'] ?: $this->templateName($type),
-            ]);
+            ];
 
-            $structure->chunks()->whereNull('deleted_at')->get()->each->delete();
-            foreach (array_values($chunks) as $index => $chunk) {
-                $structure->chunks()->create([
-                    'name' => trim($chunk['name']),
-                    'start_time' => $chunk['start_time'] ?? null,
-                    'end_time' => $chunk['end_time'] ?? null,
-                    'sort_order' => $index,
+            if ($structure) {
+                $structure->update($structureAttributes);
+            } else {
+                $structure = $user->dayStructure()->create($structureAttributes);
+            }
+
+            $activeChunks = $structure->chunks()->orderBy('sort_order')->lockForUpdate()->get();
+            $chunksChanged = $this->chunkConfigurationChanged($activeChunks, $chunks);
+            $taskAction = $validated['taskAction'] ?? null;
+            $affectedTasks = $chunksChanged && $activeChunks->isNotEmpty()
+                ? $user->tasks()
+                    ->whereIn('chunk_id', $activeChunks->modelKeys())
+                    ->with('chunk')
+                    ->lockForUpdate()
+                    ->get()
+                : collect();
+
+            if ($affectedTasks->isNotEmpty() && ! in_array($taskAction, ['delete', 'move_by_time'], true)) {
+                throw ValidationException::withMessages([
+                    'taskAction' => 'Choose whether to delete affected tasks or move them by time before changing your rhythm.',
                 ]);
+            }
+
+            $outcome = [
+                'action' => $taskAction,
+                'affected' => $affectedTasks->count(),
+                'moved' => 0,
+                'unassigned' => 0,
+                'deleted' => 0,
+            ];
+
+            if ($chunksChanged) {
+                $oldChunksById = $activeChunks->keyBy('id');
+                if ($taskAction === 'delete') {
+                    $affectedTasks->each(fn ($task) => $task->delete());
+                    $outcome['deleted'] = $affectedTasks->count();
+                }
+
+                $activeChunks->each->delete();
+                $newChunks = collect();
+                foreach (array_values($chunks) as $index => $chunk) {
+                    $newChunks->push($structure->chunks()->create([
+                        'name' => trim($chunk['name']),
+                        'start_time' => $chunk['start_time'] ?? null,
+                        'end_time' => $chunk['end_time'] ?? null,
+                        'sort_order' => $index,
+                    ]));
+                }
+
+                if ($taskAction === 'move_by_time') {
+                    foreach ($affectedTasks as $task) {
+                        $oldChunk = $oldChunksById->get($task->chunk_id);
+                        $newChunk = $this->bestTimeMatch($oldChunk, $newChunks);
+                        $task->update([
+                            'chunk_id' => $newChunk?->id,
+                            'chunk_name_snapshot' => $newChunk?->name ?? $oldChunk?->name ?? $task->chunk_name_snapshot,
+                        ]);
+                        $outcome[$newChunk ? 'moved' : 'unassigned']++;
+                    }
+                }
             }
 
             $uiSettings = $validated['settings'] ?? [];
@@ -140,9 +217,18 @@ class OnboardingController extends Controller
                 'navigation_position' => $uiSettings['navigationPosition'] ?? 'sidebar',
                 'onboarded_at' => now(),
             ]);
+
+            return $outcome;
         });
 
-        return redirect()->route('day.index')->with('success', 'Your day is ready. You can change it any time.');
+        $message = 'Your day is ready. You can change it any time.';
+        if ($taskOutcome['deleted'] > 0) {
+            $message = "Your rhythm is updated. {$taskOutcome['deleted']} tasks were deleted.";
+        } elseif ($taskOutcome['action'] === 'move_by_time' && $taskOutcome['affected'] > 0) {
+            $message = "Your rhythm is updated. {$taskOutcome['moved']} tasks moved by time; {$taskOutcome['unassigned']} stayed unassigned because there was no clear time match.";
+        }
+
+        return redirect()->route('day.index')->with('success', $message);
     }
 
     public function skip(Request $request): RedirectResponse
@@ -169,5 +255,101 @@ class OnboardingController extends Controller
             'work' => 'Work day',
             default => 'My custom day',
         };
+    }
+
+    private function chunkConfigurationChanged($activeChunks, array $newChunks): bool
+    {
+        if ($activeChunks->count() !== count($newChunks)) {
+            return true;
+        }
+
+        foreach ($activeChunks->values() as $index => $activeChunk) {
+            $newChunk = $newChunks[$index] ?? null;
+            if (
+                $newChunk === null
+                || $activeChunk->name !== trim($newChunk['name'])
+                || $this->normalizeTime($activeChunk->start_time) !== $this->normalizeTime($newChunk['start_time'] ?? null)
+                || $this->normalizeTime($activeChunk->end_time) !== $this->normalizeTime($newChunk['end_time'] ?? null)
+            ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function bestTimeMatch(?Chunk $oldChunk, $newChunks): ?Chunk
+    {
+        if (! $oldChunk || ! $oldChunk->start_time || ! $oldChunk->end_time) {
+            return null;
+        }
+
+        $bestChunk = null;
+        $bestOverlap = 0;
+        $tied = false;
+
+        foreach ($newChunks as $newChunk) {
+            if (! $newChunk->start_time || ! $newChunk->end_time) {
+                continue;
+            }
+
+            $overlap = $this->overlapMinutes(
+                (string) $oldChunk->start_time,
+                (string) $oldChunk->end_time,
+                (string) $newChunk->start_time,
+                (string) $newChunk->end_time,
+            );
+
+            if ($overlap > $bestOverlap) {
+                $bestChunk = $newChunk;
+                $bestOverlap = $overlap;
+                $tied = false;
+            } elseif ($overlap > 0 && $overlap === $bestOverlap) {
+                $tied = true;
+            }
+        }
+
+        return $bestOverlap > 0 && ! $tied ? $bestChunk : null;
+    }
+
+    private function overlapMinutes(string $firstStart, string $firstEnd, string $secondStart, string $secondEnd): int
+    {
+        $firstSegments = $this->timeSegments($firstStart, $firstEnd);
+        $secondSegments = $this->timeSegments($secondStart, $secondEnd);
+        $overlap = 0;
+
+        foreach ($firstSegments as [$firstSegmentStart, $firstSegmentEnd]) {
+            foreach ($secondSegments as [$secondSegmentStart, $secondSegmentEnd]) {
+                $overlap += max(0, min($firstSegmentEnd, $secondSegmentEnd) - max($firstSegmentStart, $secondSegmentStart));
+            }
+        }
+
+        return $overlap;
+    }
+
+    private function timeSegments(string $start, string $end): array
+    {
+        $start = $this->minutesAfterMidnight($start);
+        $end = $this->minutesAfterMidnight($end);
+
+        if ($start === $end) {
+            return [];
+        }
+
+        return $end > $start
+            ? [[$start, $end]]
+            : [[$start, 1440], [0, $end]];
+    }
+
+    private function minutesAfterMidnight(string $time): int
+    {
+        [$hours, $minutes] = array_map('intval', explode(':', substr($time, 0, 5)));
+
+        return ($hours * 60) + $minutes;
+    }
+
+    private function normalizeTime(?string $time): ?string
+    {
+        return $time ? substr($time, 0, 5) : null;
     }
 }

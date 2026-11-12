@@ -1,0 +1,158 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\Chunk;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
+
+class OnboardingTaskHandlingTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_rhythm_changes_require_a_choice_when_tasks_are_attached_to_old_chunks(): void
+    {
+        $user = User::factory()->create();
+        $this->actingAs($user);
+        $oldChunks = $this->saveRhythm([
+            ['name' => 'Morning', 'startTime' => '08:00', 'endTime' => '12:00'],
+        ]);
+        $task = $this->createTask($user, $oldChunks->first(), 'Read');
+
+        $this->post(route('onboarding.store'), $this->rhythmPayload([
+            ['name' => 'Early', 'startTime' => '08:00', 'endTime' => '10:00'],
+            ['name' => 'Late', 'startTime' => '10:00', 'endTime' => '12:00'],
+        ]))->assertSessionHasErrors('taskAction');
+
+        $this->assertDatabaseHas('chunks', [
+            'id' => $oldChunks->first()->id,
+            'deleted_at' => null,
+        ]);
+        $this->assertDatabaseHas('tasks', [
+            'id' => $task->id,
+            'chunk_id' => $oldChunks->first()->id,
+            'deleted_at' => null,
+        ]);
+    }
+
+    public function test_time_move_uses_the_greatest_overlap_and_leaves_unmatched_tasks_unassigned(): void
+    {
+        $user = User::factory()->create();
+        $this->actingAs($user);
+        $oldChunks = $this->saveRhythm([
+            ['name' => 'Morning', 'startTime' => '08:00', 'endTime' => '12:00'],
+            ['name' => 'Afternoon', 'startTime' => '12:00', 'endTime' => '16:00'],
+            ['name' => 'Prayer period', 'startTime' => '', 'endTime' => ''],
+        ]);
+        $morningTask = $this->createTask($user, $oldChunks[0], 'Read');
+        $afternoonTask = $this->createTask($user, $oldChunks[1], 'Study');
+        $unmatchedTask = $this->createTask($user, $oldChunks[2], 'Reflect');
+
+        $this->post(route('onboarding.store'), [
+            ...$this->rhythmPayload([
+                ['name' => 'First part', 'startTime' => '08:00', 'endTime' => '11:00'],
+                ['name' => 'Second part', 'startTime' => '11:00', 'endTime' => '17:00'],
+            ]),
+            'taskAction' => 'move_by_time',
+        ])->assertRedirect(route('day.index'));
+
+        $newChunks = $user->fresh()->dayStructure->chunks()->get()->keyBy('name');
+        $this->assertDatabaseHas('tasks', [
+            'id' => $morningTask->id,
+            'chunk_id' => $newChunks['First part']->id,
+            'chunk_name_snapshot' => 'First part',
+        ]);
+        $this->assertDatabaseHas('tasks', [
+            'id' => $afternoonTask->id,
+            'chunk_id' => $newChunks['Second part']->id,
+            'chunk_name_snapshot' => 'Second part',
+        ]);
+        $this->assertDatabaseHas('tasks', [
+            'id' => $unmatchedTask->id,
+            'chunk_id' => null,
+            'chunk_name_snapshot' => 'Prayer period',
+        ]);
+    }
+
+    public function test_explicit_delete_removes_affected_tasks_from_the_active_list(): void
+    {
+        $user = User::factory()->create();
+        $this->actingAs($user);
+        $oldChunks = $this->saveRhythm([
+            ['name' => 'Morning', 'startTime' => '08:00', 'endTime' => '12:00'],
+        ]);
+        $task = $this->createTask($user, $oldChunks->first(), 'Read');
+
+        $this->post(route('onboarding.store'), [
+            ...$this->rhythmPayload([
+                ['name' => 'First part', 'startTime' => '08:00', 'endTime' => '11:00'],
+                ['name' => 'Second part', 'startTime' => '11:00', 'endTime' => '17:00'],
+            ]),
+            'taskAction' => 'delete',
+        ])->assertRedirect(route('day.index'));
+
+        $this->assertSoftDeleted('tasks', ['id' => $task->id]);
+    }
+
+    public function test_time_move_leaves_a_task_unassigned_when_new_chunks_tie(): void
+    {
+        $user = User::factory()->create();
+        $this->actingAs($user);
+        $oldChunks = $this->saveRhythm([
+            ['name' => 'Morning', 'startTime' => '08:00', 'endTime' => '12:00'],
+        ]);
+        $task = $this->createTask($user, $oldChunks->first(), 'Read');
+
+        $this->post(route('onboarding.store'), [
+            ...$this->rhythmPayload([
+                ['name' => 'First part', 'startTime' => '08:00', 'endTime' => '10:00'],
+                ['name' => 'Second part', 'startTime' => '10:00', 'endTime' => '12:00'],
+            ]),
+            'taskAction' => 'move_by_time',
+        ])->assertRedirect(route('day.index'));
+
+        $this->assertDatabaseHas('tasks', [
+            'id' => $task->id,
+            'chunk_id' => null,
+            'chunk_name_snapshot' => 'Morning',
+        ]);
+    }
+
+    private function saveRhythm(array $chunks)
+    {
+        $this->post(route('onboarding.store'), $this->rhythmPayload($chunks))
+            ->assertRedirect(route('day.index'));
+
+        return auth()->user()->dayStructure->chunks()->orderBy('sort_order')->get();
+    }
+
+    private function rhythmPayload(array $chunks): array
+    {
+        return [
+            'type' => 'custom',
+            'name' => 'My rhythm',
+            'chunks' => array_column($chunks, 'name'),
+            'chunkTimes' => array_map(fn ($chunk) => [
+                'startTime' => $chunk['startTime'],
+                'endTime' => $chunk['endTime'],
+            ], $chunks),
+            'settings' => [
+                'theme' => 'light',
+                'navigationPosition' => 'sidebar',
+                'language' => 'en',
+            ],
+        ];
+    }
+
+    private function createTask(User $user, Chunk $chunk, string $title)
+    {
+        return $user->tasks()->create([
+            'chunk_id' => $chunk->id,
+            'chunk_name_snapshot' => $chunk->name,
+            'title' => $title,
+            'planned_date' => '2026-11-12',
+            'priority' => 'medium',
+        ]);
+    }
+}

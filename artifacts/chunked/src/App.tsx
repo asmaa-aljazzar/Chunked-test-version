@@ -14,6 +14,16 @@ export type Chunk = {
   endTime?: string;
   sortOrder: number;
 };
+export type AffectedTask = {
+  id: number;
+  title: string;
+  plannedDate: string;
+  chunkName?: string | null;
+  chunkStartTime?: string | null;
+  chunkEndTime?: string | null;
+  priority: 'low' | 'medium' | 'high';
+  completed: boolean;
+};
 export type Task = {
   id: number | string;
   title: string;
@@ -54,6 +64,8 @@ export type ChunkedPageProps = {
   selectedChunkId?: Chunk['id'] | null;
   completedCount?: number;
   current?: { type: string; name: string; chunks?: { id?: number; name: string; startTime?: string | null; endTime?: string | null }[] } | null;
+  affectedTasks?: AffectedTask[];
+  flash?: { success?: string };
   [key: string]: unknown;
 };
 
@@ -238,6 +250,9 @@ function DayPage() {
   const otherTasks = dailyTasks.filter((task) => String(task.chunkId) !== String(focusChunk?.id));
   const completeCount = dailyTasks.filter((task) => task.completedAt).length;
   const notify = (message: string) => { setToast(message); window.setTimeout(() => setToast(''), 2600); };
+  useEffect(() => {
+    if (props.flash?.success) notify(props.flash.success);
+  }, [props.flash?.success]);
   const saveTask = (task: Task) => {
     if (routes.taskComplete) router.patch(`${routes.taskComplete}/${task.id}/complete`, { completed: Boolean(task.completedAt) });
   };
@@ -462,13 +477,15 @@ function OnboardingPage() {
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>(props.settings?.theme ?? 'light');
   const [language] = useState(props.settings?.language ?? 'en');
   const [setupError, setSetupError] = useState('');
+  const [showTaskConfirmation, setShowTaskConfirmation] = useState(false);
+  const [savingStructure, setSavingStructure] = useState(false);
   const [chunkTimes, setChunkTimes] = useState(() => props.current?.chunks?.map((chunk) => ({
     startTime: chunk.startTime || '',
     endTime: chunk.endTime || '',
   })) ?? form.data.chunks.map(() => ({ startTime: '', endTime: '' })));
   useEffect(() => {
     if (chunkTimes.length !== form.data.chunks.length) {
-      setChunkTimes(form.data.chunks.map(() => ({ startTime: '', endTime: '' })));
+      setChunkTimes((current) => form.data.chunks.map((_, index) => current[index] ?? ({ startTime: '', endTime: '' })));
     }
   }, [chunkTimes.length, form.data.chunks.length]);
   const selectPreset = (preset: typeof presets[number]) => {
@@ -493,7 +510,17 @@ function OnboardingPage() {
     else if (props.routes?.structureUpdate) router.post(props.routes.structureUpdate, defaults, { onSuccess: () => router.visit(props.routes?.day || '/day') });
     else window.location.href = props.routes?.day || '/day';
   };
-  const finish = () => {
+  const rhythmHasChanged = () => {
+    const currentChunks = props.current?.chunks ?? [];
+    if (currentChunks.length !== form.data.chunks.length) return true;
+
+    return currentChunks.some((chunk, index) => (
+      chunk.name !== form.data.chunks[index]?.trim()
+      || (chunk.startTime || '') !== (chunkTimes[index]?.startTime || '')
+      || (chunk.endTime || '') !== (chunkTimes[index]?.endTime || '')
+    ));
+  };
+  const submitStructure = (taskAction?: 'delete' | 'move_by_time') => {
     const structure = { type: form.data.type, name: form.data.name, chunks: form.data.chunks };
     const settings = { navigationPosition: navigation, theme, language };
     if (form.data.chunks.length === 0 || form.data.chunks.some((chunk) => !chunk.trim())) {
@@ -501,11 +528,29 @@ function OnboardingPage() {
       return;
     }
     setSetupError('');
-    if (props.routes?.structureUpdate) router.post(props.routes.structureUpdate, { ...structure, chunkTimes, settings }, {
-      onSuccess: () => router.visit(props.routes?.day || '/day'),
+    if (props.routes?.structureUpdate) router.post(props.routes.structureUpdate, {
+      ...structure,
+      chunkTimes,
+      settings,
+      ...(taskAction ? { taskAction } : {}),
+    }, {
+      onStart: () => setSavingStructure(true),
+      onFinish: () => setSavingStructure(false),
       onError: (errors) => setSetupError(Object.values(errors).join(' ')),
     });
     else window.location.href = props.routes?.day || '/day';
+  };
+  const finish = () => {
+    if (form.data.chunks.length === 0 || form.data.chunks.some((chunk) => !chunk.trim())) {
+      setSetupError('Give every part of your day a name, or remove the empty part.');
+      return;
+    }
+    if (props.current && rhythmHasChanged() && (props.affectedTasks?.length ?? 0) > 0) {
+      setSetupError('');
+      setShowTaskConfirmation(true);
+      return;
+    }
+    submitStructure();
   };
   return <div className="main-canvas grain min-h-[100dvh]">
     <header className="flex h-[72px] items-center justify-between px-5 sm:px-10"><WordmarkLight /><button onClick={skipSetup} className="text-xs text-muted hover:text-[hsl(var(--primary))]">Skip setup <ArrowRight className="ml-1 inline" size={13} /></button></header>
@@ -520,7 +565,7 @@ function OnboardingPage() {
               <div className="mt-3 flex flex-wrap gap-1.5">{preset.parts.map((part) => <span key={part} className="rounded-full bg-[hsl(var(--muted))] px-2.5 py-1 text-[9px] text-muted">{part}</span>)}</div>
             </button>)}
           </div>
-          <div className="mt-4 rounded-[18px] border border-soft bg-[hsl(var(--card))] p-4"><div className="mb-3 text-xs font-semibold">Make the chunks yours</div><div className="flex flex-wrap gap-2">{form.data.chunks.map((chunk, index) => <div key={`${chunk}-${index}`} className="flex items-center gap-1 rounded-full bg-[hsl(var(--muted))] pl-3 pr-1 text-xs"><input aria-label={`Chunk ${index + 1} name`} value={chunk} onChange={(e) => form.setData('chunks', form.data.chunks.map((name, i) => i === index ? e.target.value : name))} className="w-24 bg-transparent py-2 outline-none" /><button aria-label={`Remove ${chunk}`} onClick={() => form.setData('chunks', form.data.chunks.filter((_, i) => i !== index))} className="rounded-full p-1 text-muted hover:bg-white/70"><X size={12} /></button></div>)}<form onSubmit={(e) => { e.preventDefault(); if (customChunk.trim()) { form.setData('chunks', [...form.data.chunks, customChunk.trim()]); setCustomChunk(''); } }} className="flex"><input value={customChunk} onChange={(e) => setCustomChunk(e.target.value)} placeholder="Add a chunk" className="w-28 rounded-full border border-soft bg-transparent px-3 text-xs" /><button aria-label="Add chunk" className="ml-1 rounded-full bg-[hsl(var(--primary))] p-2 text-white"><Plus size={13} /></button></form></div></div>
+          <div className="mt-4 rounded-[18px] border border-soft bg-[hsl(var(--card))] p-4"><div className="mb-3 text-xs font-semibold">Make the chunks yours</div><div className="flex flex-wrap gap-2">{form.data.chunks.map((chunk, index) => <div key={`${chunk}-${index}`} className="flex items-center gap-1 rounded-full bg-[hsl(var(--muted))] pl-3 pr-1 text-xs"><input aria-label={`Chunk ${index + 1} name`} value={chunk} onChange={(e) => form.setData('chunks', form.data.chunks.map((name, i) => i === index ? e.target.value : name))} className="w-24 bg-transparent py-2 outline-none" /><button aria-label={`Remove ${chunk}`} onClick={() => { form.setData('chunks', form.data.chunks.filter((_, i) => i !== index)); setChunkTimes((current) => current.filter((_, i) => i !== index)); }} className="rounded-full p-1 text-muted hover:bg-white/70"><X size={12} /></button></div>)}<form onSubmit={(e) => { e.preventDefault(); if (customChunk.trim()) { form.setData('chunks', [...form.data.chunks, customChunk.trim()]); setChunkTimes((current) => [...current, { startTime: '', endTime: '' }]); setCustomChunk(''); } }} className="flex"><input value={customChunk} onChange={(e) => setCustomChunk(e.target.value)} placeholder="Add a chunk" className="w-28 rounded-full border border-soft bg-transparent px-3 text-xs" /><button aria-label="Add chunk" className="ml-1 rounded-full bg-[hsl(var(--primary))] p-2 text-white"><Plus size={13} /></button></form></div></div>
         </section>
         <aside className="surface rounded-[22px] p-5 sm:p-6">
           <div className="mono text-[10px] uppercase tracking-[.14em] text-muted">A quick preview</div><h2 className="serif mb-0 mt-2 text-[27px] font-normal">Your day, gently.</h2>
@@ -530,20 +575,36 @@ function OnboardingPage() {
           </div>
           <div className="mt-5"><div className="text-xs font-semibold">Color mood</div><div className="mt-2 flex gap-2"><button onClick={() => { setTheme('light'); document.documentElement.classList.remove('dark'); }} aria-pressed={theme === 'light'} className={`flex flex-1 items-center gap-2 rounded-xl border p-2.5 text-[10px] ${theme === 'light' ? 'border-[#82977f] bg-[#edf1e9]' : 'border-soft'}`}><Sun size={14} />Daylight</button><button onClick={() => { setTheme('dark'); document.documentElement.classList.add('dark'); }} aria-pressed={theme === 'dark'} className={`flex flex-1 items-center gap-2 rounded-xl border p-2.5 text-[10px] ${theme === 'dark' ? 'border-[#82977f] bg-[#edf1e9]' : 'border-soft'}`}><Moon size={14} />Evening</button></div></div>
           {setupError && <p role="alert" className="mt-4 rounded-xl bg-[#f5e8e3] px-3 py-2 text-[11px] text-[#984e42]">{setupError}</p>}
-          {(activePreset === 'work' || activePreset === 'custom') && <div className="mt-5 rounded-xl border border-soft p-3">
-            <div className="mb-2 text-[10px] font-semibold">Optional block times</div>
+          <details className="mt-5 rounded-xl border border-soft p-3">
+            <summary className="cursor-pointer text-[10px] font-semibold">Optional times · help place existing tasks</summary>
+            <p className="mb-3 mt-2 text-[10px] leading-4 text-muted">When changing your rhythm, clear time overlaps can move tasks to a matching block.</p>
             <div className="space-y-2">{form.data.chunks.map((chunk, index) => <div key={`time-${index}`} className="flex items-center gap-2">
               <span className="min-w-0 flex-1 truncate text-[10px] text-muted">{chunk || `Part ${index + 1}`}</span>
               <input type="time" aria-label={`${chunk || `Part ${index + 1}`} start time`} value={chunkTimes[index]?.startTime || ''} onChange={(event) => setChunkTimes((current) => current.map((times, i) => i === index ? { ...(times ?? { startTime: '', endTime: '' }), startTime: event.target.value } : times))} className="h-8 w-[96px] rounded-lg border border-soft bg-[hsl(var(--background))] px-2 text-[10px]" />
               <span className="text-[9px] text-muted">to</span>
               <input type="time" aria-label={`${chunk || `Part ${index + 1}`} end time`} value={chunkTimes[index]?.endTime || ''} onChange={(event) => setChunkTimes((current) => current.map((times, i) => i === index ? { ...(times ?? { startTime: '', endTime: '' }), endTime: event.target.value } : times))} className="h-8 w-[96px] rounded-lg border border-soft bg-[hsl(var(--background))] px-2 text-[10px]" />
             </div>)}</div>
-          </div>}
-          <button onClick={finish} className="mt-6 flex w-full items-center justify-center gap-2 rounded-full bg-[hsl(var(--primary))] py-3 text-xs font-semibold text-[hsl(var(--primary-foreground))] transition-transform hover:-translate-y-0.5">Save my rhythm <ArrowRight size={14} /></button>
+          </details>
+          <button onClick={finish} disabled={savingStructure} className="mt-6 flex w-full items-center justify-center gap-2 rounded-full bg-[hsl(var(--primary))] py-3 text-xs font-semibold text-[hsl(var(--primary-foreground))] transition-transform hover:-translate-y-0.5 disabled:opacity-60">{savingStructure ? 'Saving…' : 'Save my rhythm'} {!savingStructure && <ArrowRight size={14} />}</button>
           <button onClick={skipSetup} className="mt-3 block w-full text-center text-[10px] text-muted hover:text-[hsl(var(--primary))]">Or skip and start with a gentle default</button>
         </aside>
       </div>
     </main>
+    {showTaskConfirmation && <Overlay title="Tasks are in these chunks" eyebrow="Before your rhythm changes" onClose={() => setShowTaskConfirmation(false)}>
+      <p className="mt-4 text-xs leading-5 text-muted">This change affects {props.affectedTasks?.length ?? 0} tasks across their planned days. Choose what to do before saving the new rhythm.</p>
+      <p className="mb-0 text-[11px] leading-5 text-muted">Moving uses the greatest overlap between old and new block times. Tasks without a clear, unique time match stay unassigned.</p>
+      <div className="mt-4 max-h-[30vh] space-y-2 overflow-y-auto rounded-xl border border-soft p-2">
+        {(props.affectedTasks ?? []).map((task) => <div key={task.id} className="flex items-start justify-between gap-3 rounded-lg px-2 py-2">
+          <div className="min-w-0"><div className="truncate text-xs font-medium">{task.title}</div><div className="mt-1 text-[10px] text-muted">{displayDate(task.plannedDate)}{task.chunkName ? ` · ${task.chunkName}` : ''}{task.completed ? ' · completed' : ''}</div></div>
+          <span className="shrink-0 rounded-full bg-[hsl(var(--muted))] px-2 py-1 text-[9px] text-muted">{task.priority}</span>
+        </div>)}
+      </div>
+      <div className="mt-5 grid gap-2 sm:grid-cols-2">
+        <button type="button" disabled={savingStructure} onClick={() => submitStructure('move_by_time')} className="rounded-xl bg-[hsl(var(--primary))] px-4 py-3 text-xs font-semibold text-[hsl(var(--primary-foreground))] disabled:opacity-60">Move where times overlap</button>
+        <button type="button" disabled={savingStructure} onClick={() => submitStructure('delete')} className="rounded-xl border border-[#d7b7ac] px-4 py-3 text-xs font-semibold text-[#9a5144] disabled:opacity-60">Delete affected tasks</button>
+        <button type="button" disabled={savingStructure} onClick={() => setShowTaskConfirmation(false)} className="rounded-xl px-4 py-3 text-xs text-muted hover:bg-[hsl(var(--muted))] sm:col-span-2">Cancel rhythm change</button>
+      </div>
+    </Overlay>}
   </div>;
 }
 

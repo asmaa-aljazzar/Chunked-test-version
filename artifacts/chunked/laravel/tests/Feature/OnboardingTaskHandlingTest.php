@@ -127,6 +127,76 @@ class OnboardingTaskHandlingTest extends TestCase
         ]);
     }
 
+    public function test_explicit_task_decisions_move_unassign_and_delete_tasks_together(): void
+    {
+        $user = User::factory()->create();
+        $this->actingAs($user);
+        $oldChunks = $this->saveRhythm([
+            ['name' => 'Morning', 'startTime' => '08:00', 'endTime' => '12:00'],
+            ['name' => 'Unclear', 'startTime' => '', 'endTime' => ''],
+        ]);
+        $moveTask = $this->createTask($user, $oldChunks[0], 'Read');
+        $unassignTask = $this->createTask($user, $oldChunks[1], 'Reflect');
+        $deleteTask = $this->createTask($user, $oldChunks[1], 'Archive');
+
+        $this->post(route('onboarding.store'), [
+            ...$this->rhythmPayload([
+                ['name' => 'Early', 'startTime' => '08:00', 'endTime' => '10:00'],
+                ['name' => 'Later', 'startTime' => '10:00', 'endTime' => '12:00'],
+            ]),
+            'taskDecisions' => [
+                ['taskId' => $moveTask->id, 'action' => 'move', 'chunkIndex' => 1],
+                ['taskId' => $unassignTask->id, 'action' => 'unassigned'],
+                ['taskId' => $deleteTask->id, 'action' => 'delete'],
+            ],
+        ])->assertRedirect(route('day.index'));
+
+        $newChunks = $user->fresh()->dayStructure->chunks()->get()->keyBy('name');
+        $this->assertDatabaseHas('tasks', [
+            'id' => $moveTask->id,
+            'chunk_id' => $newChunks['Later']->id,
+            'chunk_name_snapshot' => 'Later',
+        ]);
+        $this->assertDatabaseHas('tasks', [
+            'id' => $unassignTask->id,
+            'chunk_id' => null,
+            'chunk_name_snapshot' => 'Unclear',
+        ]);
+        $this->assertSoftDeleted('tasks', ['id' => $deleteTask->id]);
+    }
+
+    public function test_incomplete_task_decisions_do_not_change_the_rhythm_or_tasks(): void
+    {
+        $user = User::factory()->create();
+        $this->actingAs($user);
+        $oldChunks = $this->saveRhythm([
+            ['name' => 'Morning', 'startTime' => '08:00', 'endTime' => '12:00'],
+        ]);
+        $firstTask = $this->createTask($user, $oldChunks->first(), 'Read');
+        $secondTask = $this->createTask($user, $oldChunks->first(), 'Write');
+
+        $this->post(route('onboarding.store'), [
+            ...$this->rhythmPayload([
+                ['name' => 'New morning', 'startTime' => '08:00', 'endTime' => '12:00'],
+            ]),
+            'taskDecisions' => [
+                ['taskId' => $firstTask->id, 'action' => 'unassigned'],
+            ],
+        ])->assertSessionHasErrors('taskDecisions');
+
+        $this->assertDatabaseHas('chunks', [
+            'id' => $oldChunks->first()->id,
+            'deleted_at' => null,
+        ]);
+        foreach ([$firstTask, $secondTask] as $task) {
+            $this->assertDatabaseHas('tasks', [
+                'id' => $task->id,
+                'chunk_id' => $oldChunks->first()->id,
+                'deleted_at' => null,
+            ]);
+        }
+    }
+
     private function saveRhythm(array $chunks)
     {
         $this->post(route('onboarding.store'), $this->rhythmPayload($chunks))

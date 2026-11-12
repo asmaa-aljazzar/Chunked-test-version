@@ -88,6 +88,18 @@ function dateKey(offset = 0) {
   date.setDate(date.getDate() + offset);
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
+function timeSegments(start: string, end: string): [number, number][] {
+  const toMinutes = (time: string) => {
+    const [hours, minutes] = time.slice(0, 5).split(':').map(Number);
+    return (hours * 60) + minutes;
+  };
+  const startMinutes = toMinutes(start);
+  const endMinutes = toMinutes(end);
+  if (startMinutes === endMinutes) return [];
+  return endMinutes > startMinutes
+    ? [[startMinutes, endMinutes]]
+    : [[startMinutes, 1440], [0, endMinutes]];
+}
 function shiftedDate(base: string, offset: number) {
   const date = new Date(`${base}T12:00:00`);
   date.setDate(date.getDate() + offset);
@@ -110,18 +122,6 @@ function dayPart(name?: string | null) {
   if (/\b(afternoon|midday|noon)\b/.test(normalized)) return 'afternoon';
   if (/\b(evening|night)\b/.test(normalized)) return 'evening';
   return null;
-}
-function timeSegments(start: string, end: string): [number, number][] {
-  const toMinutes = (time: string) => {
-    const [hours, minutes] = time.split(':').map(Number);
-    return hours * 60 + minutes;
-  };
-  const startMinutes = toMinutes(start);
-  const endMinutes = toMinutes(end);
-  if (startMinutes === endMinutes) return [];
-  return endMinutes > startMinutes
-    ? [[startMinutes, endMinutes]]
-    : [[startMinutes, 1440], [0, endMinutes]];
 }
 function timeOverlapMinutes(oldStart: string, oldEnd: string, newStart: string, newEnd: string) {
   const oldSegments = timeSegments(oldStart, oldEnd);
@@ -595,6 +595,7 @@ function OnboardingPage() {
     }, {
       onStart: () => setSavingStructure(true),
       onFinish: () => setSavingStructure(false),
+      onSuccess: () => setShowTaskConfirmation(false),
       onError: (errors) => setSetupError(Object.values(errors).join(' ')),
     });
     else window.location.href = props.routes?.day || '/day';
@@ -705,7 +706,7 @@ function OnboardingPage() {
             </div>
             <label className="mt-3 block text-[10px] font-semibold">
               {suggestion ? `Suggested: ${form.data.chunks[suggestion.chunkIndex]} · ${suggestion.reason}` : 'No clear match · choose what happens'}
-              <select aria-label={`Destination or action for ${task.title}`} value={taskChoices[task.id] ?? ''} onChange={(event) => setTaskChoices((current) => ({ ...current, [task.id]: event.target.value }))} className="mt-1.5 h-10 w-full rounded-lg border border-soft bg-[hsl(var(--background))] px-3 text-xs font-normal">
+              <select aria-label={`Destination or action for ${task.title}`} data-testid={`select-task-decision-${task.id}`} value={taskChoices[task.id] ?? ''} onChange={(event) => setTaskChoices((current) => ({ ...current, [task.id]: event.target.value }))} className="mt-1.5 h-10 w-full rounded-lg border border-soft bg-[hsl(var(--background))] px-3 text-xs font-normal">
                 <option value="">{suggestion ? 'Select to confirm or choose another action' : 'Choose a destination or action'}</option>
                 {form.data.chunks.map((chunk, index) => <option key={`${chunk}-${index}`} value={`move:${index}`}>{suggestion?.chunkIndex === index ? `Move to ${chunk} · suggested` : `Move to ${chunk}`}</option>)}
                 <option value="unassigned">Leave unassigned</option>
@@ -716,8 +717,8 @@ function OnboardingPage() {
         })}
       </div>
       <div className="mt-5 grid gap-2 sm:grid-cols-2">
-        <button type="button" disabled={savingStructure || (props.affectedTasks ?? []).some((task) => !taskChoices[task.id])} onClick={applyTaskChoices} className="rounded-xl bg-[hsl(var(--primary))] px-4 py-3 text-xs font-semibold text-[hsl(var(--primary-foreground))] disabled:opacity-50 sm:col-span-2">{savingStructure ? 'Saving…' : 'Confirm choices and save rhythm'}</button>
-        <button type="button" disabled={savingStructure} onClick={() => setShowTaskConfirmation(false)} className="rounded-xl px-4 py-3 text-xs text-muted hover:bg-[hsl(var(--muted))] sm:col-span-2">Cancel rhythm change</button>
+        <button type="button" data-testid="button-save-rhythm-task-choices" disabled={savingStructure || (props.affectedTasks ?? []).some((task) => !taskChoices[task.id])} onClick={applyTaskChoices} className="rounded-xl bg-[hsl(var(--primary))] px-4 py-3 text-xs font-semibold text-[hsl(var(--primary-foreground))] disabled:opacity-50 sm:col-span-2">{savingStructure ? 'Saving…' : 'Confirm choices and save rhythm'}</button>
+        <button type="button" data-testid="button-cancel-rhythm-task-choices" disabled={savingStructure} onClick={() => setShowTaskConfirmation(false)} className="rounded-xl px-4 py-3 text-xs text-muted hover:bg-[hsl(var(--muted))] sm:col-span-2">Cancel rhythm change</button>
       </div>
     </Overlay>}
   </div>;

@@ -21,7 +21,7 @@ export type Task = {
   plannedDate: string;
   chunkId?: number | string | null;
   chunkName?: string | null;
-  priority: 'low' | 'normal' | 'high';
+  priority: 'low' | 'medium' | 'high';
   completedAt?: string | null;
 };
 export type UserSettings = {
@@ -168,7 +168,7 @@ function TaskDialog({ chunks, close, onCreate, selectedChunk, plannedDate, taskS
     description: task?.description ?? '',
     plannedDate: task?.plannedDate ?? plannedDate,
     chunkId: task ? (task.chunkId ? String(task.chunkId) : '') : String(selectedChunk),
-    priority: task?.priority ?? 'normal' as Task['priority'],
+    priority: task?.priority ?? 'medium' as Task['priority'],
   });
   const submit = (event: FormEvent) => {
     event.preventDefault();

@@ -16,7 +16,7 @@ return new class extends Migration
             $table->string('title', 200);
             $table->text('description')->nullable();
             $table->date('planned_date');
-            $table->string('priority', 12)->default('normal');
+            $table->string('priority', 12)->default('medium');
             $table->timestamp('completed_at')->nullable();
             $table->unsignedSmallInteger('sort_order')->default(0);
             $table->timestamps();

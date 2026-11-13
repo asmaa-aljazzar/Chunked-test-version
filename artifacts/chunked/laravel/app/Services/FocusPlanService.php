@@ -527,6 +527,57 @@ class FocusPlanService
         ];
     }
 
+    public function history(User $user, string $fromDate, string $toDate): array
+    {
+        $now = CarbonImmutable::now('UTC');
+        $sessions = $user->focusSessions()
+            ->whereBetween('planned_date', [$fromDate, $toDate])
+            ->with('chunk')
+            ->orderByDesc('planned_date')
+            ->orderBy('chunk_name_snapshot')
+            ->orderBy('started_at')
+            ->orderBy('id')
+            ->get()
+            ->map(function (FocusSession $session) use ($now): array {
+                $focusedSeconds = (int) $session->focused_seconds;
+                if ($session->status === 'running' && $session->last_resumed_at) {
+                    $focusedSeconds += max(
+                        0,
+                        $now->getTimestamp() - CarbonImmutable::parse($session->last_resumed_at)->utc()->getTimestamp(),
+                    );
+                }
+
+                return [
+                    'id' => $session->id,
+                    'date' => $session->planned_date->toDateString(),
+                    'chunkName' => $session->chunk_name_snapshot ?: $session->chunk?->name ?: 'Focus time',
+                    'status' => $session->status,
+                    'focusedSeconds' => min((int) $session->planned_seconds, $focusedSeconds),
+                    'contextNote' => $session->context_note,
+                    'startedAt' => $session->started_at?->toISOString(),
+                    'endedAt' => $session->ended_at?->toISOString(),
+                ];
+            });
+
+        return $sessions
+            ->groupBy('date')
+            ->map(fn ($daySessions, string $date) => [
+                'date' => $date,
+                'focusedSeconds' => (int) $daySessions->sum('focusedSeconds'),
+                'chunks' => $daySessions
+                    ->groupBy('chunkName')
+                    ->map(fn ($chunkSessions, string $chunkName) => [
+                        'chunkName' => $chunkName,
+                        'focusedSeconds' => (int) $chunkSessions->sum('focusedSeconds'),
+                        'sessions' => $chunkSessions->values()->all(),
+                    ])
+                    ->values()
+                    ->all(),
+            ])
+            ->values()
+            ->all();
+    }
+
     private function syncLocked(FocusPlan $plan): FocusPlan
     {
         $now = CarbonImmutable::now('UTC');

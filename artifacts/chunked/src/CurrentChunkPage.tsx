@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   ArrowLeft, Check, ChevronLeft, ChevronRight, Clock3, Headphones, Image, ListTodo, Pause, Pencil,
-  Play, RotateCcw, Settings2, Trash2, Volume2, VolumeX, X,
+  History, Play, RotateCcw, Settings2, Trash2, Volume2, VolumeX, X,
 } from 'lucide-react';
 import { isVideoUrl, validateDirectAudioUrl, validateDirectVisualUrl } from './focusMedia';
 import './CurrentChunkPage.css';
@@ -44,6 +44,29 @@ export type FocusMediaEntry = {
 
 export type FocusSoundSource = 'video' | 'library' | 'silence';
 
+export type FocusHistorySession = {
+  id: number;
+  date: string;
+  chunkName: string;
+  status: 'completed' | 'partial' | 'abandoned' | 'running' | 'paused';
+  focusedSeconds: number;
+  contextNote?: string | null;
+  startedAt?: string | null;
+  endedAt?: string | null;
+};
+
+export type FocusHistoryChunk = {
+  chunkName: string;
+  focusedSeconds: number;
+  sessions: FocusHistorySession[];
+};
+
+export type FocusHistoryDay = {
+  date: string;
+  focusedSeconds: number;
+  chunks: FocusHistoryChunk[];
+};
+
 export type FocusSessionState = {
   planId?: number;
   sessionId?: number | null;
@@ -83,6 +106,7 @@ export type CurrentChunkPageProps = {
   availableChunks?: AvailableChunk[];
   nextChunk?: AvailableChunk | null;
   session?: Partial<FocusSessionState>;
+  focusHistory?: FocusHistoryDay[];
   nextSessionAutoStart?: { automaticMode: boolean; remainingTargetSeconds: number };
   mediaCatalog?: FocusMediaEntry[];
   selectedBackgroundId?: string | null;
@@ -101,6 +125,7 @@ export type CurrentChunkPageProps = {
   onSwitchToChunk?: (chunk: AvailableChunk, options: { autoStart: boolean; remainingTargetSeconds: number }) => void | Promise<void>;
   onSessionChange?: (session: FocusSessionState) => void;
   onTimerAction?: (action: FocusTimerAction, session: FocusSessionState) => void | Promise<void>;
+  onSaveFocusContext?: (sessionId: number, contextNote: string | null) => void | Promise<void>;
   onPlanSettingsChange?: (session: FocusSessionState) => void | Promise<void>;
   onSelectBackground?: (entry: FocusMediaEntry | null) => void;
   onSelectSound?: (entry: FocusMediaEntry | null) => void;
@@ -111,7 +136,7 @@ export type CurrentChunkPageProps = {
   onFinishSession?: (session: FocusSessionState) => void;
 };
 
-type Panel = 'tasks' | 'timer' | 'background' | 'sound' | null;
+type Panel = 'tasks' | 'timer' | 'background' | 'sound' | 'history' | null;
 const TASK_CARDS_PER_PAGE = 3;
 const INITIAL_SESSION: FocusSessionState = {
   phase: 'focus', active: false, paused: false, targetSeconds: 25 * 60, progressSeconds: 0,
@@ -187,9 +212,84 @@ function formatPlanDuration(totalSeconds: number) {
   return hours ? `${hours} hr${hours === 1 ? '' : 's'}${minutes ? ` ${minutes} min` : ''}` : `${minutes} min`;
 }
 
+function formatFocusedTime(totalSeconds: number) {
+  const seconds = Math.max(0, Math.floor(totalSeconds));
+  const totalMinutes = Math.floor(seconds / 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours) return `${hours} hr${hours === 1 ? '' : 's'}${minutes ? ` ${minutes} min` : ''}`;
+  if (totalMinutes) return `${totalMinutes} min`;
+  return `${seconds} sec`;
+}
+
+function FocusHistorySessionCard({
+  session,
+  onSave,
+}: {
+  session: FocusHistorySession;
+  onSave?: (sessionId: number, contextNote: string | null) => void | Promise<void>;
+}) {
+  const [draft, setDraft] = useState(session.contextNote ?? '');
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const label = session.status === 'completed'
+    ? 'Completed'
+    : session.status === 'partial'
+      ? 'Partial'
+      : session.status === 'abandoned'
+        ? 'Reset'
+        : session.status === 'paused' ? 'Paused' : 'In progress';
+
+  useEffect(() => setDraft(session.contextNote ?? ''), [session.contextNote]);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!onSave || saving) return;
+    setSaving(true);
+    setMessage('');
+    try {
+      await onSave(session.id, draft.trim() || null);
+      setMessage('Saved');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'This note could not be saved.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <article className="room-history-session" data-testid={`card-focus-session-${session.id}`}>
+      <div className="room-history-session-summary">
+        <span className={`room-history-status is-${session.status}`} data-testid={`status-focus-session-${session.id}`}>{label}</span>
+        <strong>{formatFocusedTime(session.focusedSeconds)}</strong>
+      </div>
+      <form className="room-history-note" onSubmit={submit}>
+        <label htmlFor={`focus-context-${session.id}`}>Optional context</label>
+        <textarea
+          id={`focus-context-${session.id}`}
+          value={draft}
+          maxLength={500}
+          disabled={!onSave || saving}
+          onChange={(event) => { setDraft(event.target.value); setMessage(''); }}
+          placeholder="Anything that shaped this session?"
+          aria-describedby={`focus-context-hint-${session.id}`}
+          data-testid={`input-focus-context-${session.id}`}
+        />
+        <div className="room-history-note-footer">
+          <small id={`focus-context-hint-${session.id}`}>Optional. Add only what feels useful; up to 500 characters.</small>
+          <button type="submit" disabled={!onSave || saving || draft === (session.contextNote ?? '')} data-testid={`button-save-focus-context-${session.id}`}>
+            {saving ? 'Saving…' : 'Save note'}
+          </button>
+        </div>
+        {message && <p className="room-history-note-message" role="status">{message}</p>}
+      </form>
+    </article>
+  );
+}
+
 export default function CurrentChunkPage({
   chunk, tasks, date, onToggleTask, onBack, checklistItems = [], availableChunks = [], nextChunk = null,
-  session: sessionProps, nextSessionAutoStart, onTimerAction, onPlanSettingsChange,
+  session: sessionProps, focusHistory = [], nextSessionAutoStart, onTimerAction, onSaveFocusContext, onPlanSettingsChange,
   mediaCatalog = [], selectedBackgroundId = null, selectedSoundId = null, volume: initialVolume = 28,
   soundSource: initialSoundSource, muted: initialMuted = false, reduceMotion: reduceMotionProp,
   onToggleChecklistItem, onAddChecklistItem, onAddYouTube,
@@ -912,11 +1012,43 @@ export default function CurrentChunkPage({
             <section id="focus-room-panel" className={`room-panel room-panel-${panel}`} aria-labelledby="focus-room-panel-heading">
               <div className="room-panel-heading">
                 <div>
-                  <p className="room-panel-kicker">{panel === 'tasks' ? 'THE SMALL STEPS' : panel === 'timer' ? 'MAKE IT YOURS' : panel === 'background' ? 'A PLACE TO LAND' : 'OPTIONAL ATMOSPHERE'}</p>
-                  <h2 id="focus-room-panel-heading">{panel === 'tasks' ? 'Your checklist' : panel === 'timer' ? 'Timer settings' : panel === 'background' ? 'Background' : 'Sound'}</h2>
+                  <p className="room-panel-kicker">{panel === 'tasks' ? 'THE SMALL STEPS' : panel === 'timer' ? 'MAKE IT YOURS' : panel === 'background' ? 'A PLACE TO LAND' : panel === 'history' ? 'A LOOK BACK' : 'OPTIONAL ATMOSPHERE'}</p>
+                  <h2 id="focus-room-panel-heading">{panel === 'tasks' ? 'Your checklist' : panel === 'timer' ? 'Timer settings' : panel === 'background' ? 'Background' : panel === 'history' ? 'Recent focus' : 'Sound'}</h2>
                 </div>
                 <button ref={panelCloseRef} type="button" className="room-panel-close" onClick={() => setPanel(null)} aria-label="Close panel"><X size={18} /></button>
               </div>
+
+              {panel === 'history' && (
+                <div className="room-panel-content room-history-content" data-testid="section-focus-history">
+                  <p className="room-panel-note">A gentle look at the last 30 days. Time reflects focus recorded for each session; notes are yours to add or leave blank.</p>
+                  {focusHistory.length === 0 ? (
+                    <p className="room-empty" data-testid="text-focus-history-empty">Your focus history will appear here when you start a session.</p>
+                  ) : (
+                    <div className="room-history-days">
+                      {focusHistory.map((day) => (
+                        <section className="room-history-day" key={day.date} data-testid={`section-focus-day-${day.date}`}>
+                          <header>
+                            <h3>{new Intl.DateTimeFormat('en', { weekday: 'long', month: 'short', day: 'numeric' }).format(new Date(`${day.date}T12:00:00`))}</h3>
+                            <strong data-testid={`text-focus-day-total-${day.date}`}>{formatFocusedTime(day.focusedSeconds)}</strong>
+                          </header>
+                          {day.chunks.map((historyChunk) => (
+                            <section className="room-history-chunk" key={`${day.date}-${historyChunk.chunkName}`} data-testid={`section-focus-chunk-${day.date}-${historyChunk.chunkName}`}>
+                              <header><h4>{historyChunk.chunkName}</h4><span>{formatFocusedTime(historyChunk.focusedSeconds)}</span></header>
+                              {historyChunk.sessions.map((historySession) => (
+                                <FocusHistorySessionCard
+                                  key={historySession.id}
+                                  session={historySession}
+                                  onSave={onSaveFocusContext}
+                                />
+                              ))}
+                            </section>
+                          ))}
+                        </section>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {panel === 'tasks' && (
                 <div className="room-panel-content">
@@ -1154,6 +1286,7 @@ export default function CurrentChunkPage({
             <button type="button" className={panel === 'timer' ? 'active' : ''} aria-controls="focus-room-panel" aria-pressed={panel === 'timer'} onClick={(event) => { panelTriggerRef.current = event.currentTarget; setPanel(panel === 'timer' ? null : 'timer'); }} data-testid="button-open-timer"><Settings2 size={17} /><span>Timer settings</span></button>
             <button type="button" className={panel === 'background' ? 'active' : ''} aria-controls="focus-room-panel" aria-pressed={panel === 'background'} onClick={(event) => { panelTriggerRef.current = event.currentTarget; setPanel(panel === 'background' ? null : 'background'); }} data-testid="button-open-background"><Image size={17} /><span>Background</span></button>
             <button type="button" className={panel === 'sound' ? 'active' : ''} aria-controls="focus-room-panel" aria-pressed={panel === 'sound'} onClick={(event) => { panelTriggerRef.current = event.currentTarget; setPanel(panel === 'sound' ? null : 'sound'); }} data-testid="button-open-sound">{soundSource === 'silence' || (muted && !youtubeSoundSource) ? <VolumeX size={17} /> : <Volume2 size={17} />}<span>Sound</span></button>
+            <button type="button" className={panel === 'history' ? 'active' : ''} aria-controls="focus-room-panel" aria-pressed={panel === 'history'} onClick={(event) => { panelTriggerRef.current = event.currentTarget; setPanel(panel === 'history' ? null : 'history'); }} data-testid="button-open-focus-history"><History size={17} /><span>History</span></button>
             <button type="button" onClick={() => { setPanel(null); setHidden(true); }} data-testid="button-hide-room"><X size={17} /><span>Hide</span></button>
           </nav>
         </>

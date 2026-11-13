@@ -19,6 +19,7 @@ class FocusSession extends Model
         'planned_seconds',
         'focused_seconds',
         'remaining_seconds',
+        'context_note',
         'started_at',
         'last_resumed_at',
         'ended_at',

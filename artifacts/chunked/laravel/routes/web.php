@@ -26,6 +26,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/focus', [FocusController::class, 'index'])->name('focus.index');
     Route::patch('/focus/plans/{plan}/settings', [FocusPlanController::class, 'settings'])->name('focus.plans.settings');
     Route::post('/focus/plans/{plan}/action', [FocusPlanController::class, 'action'])->name('focus.plans.action');
+    Route::patch('/focus/sessions/{session}/context', [FocusPlanController::class, 'updateSessionContext'])->name('focus.sessions.context');
     Route::post('/focus/plans/{plan}/switch-chunk', [FocusPlanController::class, 'switchChunk'])->name('focus.plans.switch-chunk');
     Route::post('/focus/media/youtube', [FocusMediaController::class, 'storeYoutube'])->name('focus.media.youtube');
     Route::get('/onboarding', [OnboardingController::class, 'index'])->name('onboarding.index');

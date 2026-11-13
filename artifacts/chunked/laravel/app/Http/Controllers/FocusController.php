@@ -109,6 +109,11 @@ class FocusController extends Controller
             ->filter(fn (array $asset) => is_string($asset['url']) && $asset['url'] !== '')
             ->values();
         $timerState = $focusPlans->state($plan);
+        $focusHistory = $focusPlans->history(
+            $user,
+            CarbonImmutable::parse($date, $timezone)->subDays(29)->toDateString(),
+            $date,
+        );
 
         return Inertia::render('App', [
             'date' => $date,
@@ -133,6 +138,7 @@ class FocusController extends Controller
             'availableChunks' => $chunkOptions->all(),
             'focusPlanId' => $plan->id,
             'session' => $timerState,
+            'focusHistory' => $focusHistory,
             'nextSessionAutoStart' => [
                 'automaticMode' => $plan->transition_mode === 'automatic',
                 'remainingTargetSeconds' => $timerState['remainingPlanSeconds'],

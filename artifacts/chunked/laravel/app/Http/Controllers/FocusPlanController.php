@@ -11,6 +11,19 @@ use Illuminate\Validation\ValidationException;
 
 class FocusPlanController extends Controller
 {
+    public function updateSessionContext(Request $request, int $session): RedirectResponse
+    {
+        $session = $request->user()->focusSessions()->whereKey($session)->firstOrFail();
+        $validated = $request->validate([
+            'context_note' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $session->context_note = $validated['context_note'] ?? null;
+        $session->save();
+
+        return back();
+    }
+
     public function settings(Request $request, int $planId, FocusPlanService $service): RedirectResponse
     {
         $plan = $this->ownedPlan($request, $planId);

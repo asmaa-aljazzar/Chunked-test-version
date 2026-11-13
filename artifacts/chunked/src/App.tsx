@@ -8,6 +8,7 @@ import {
 import CurrentChunkPage, {
   type AvailableChunk,
   type CurrentChunkChecklistItem,
+  type FocusHistoryDay,
   type FocusMediaEntry,
   type FocusSoundSource,
   type FocusSessionState,
@@ -55,6 +56,7 @@ export type ChunkedRoutes = Partial<{
   focusPlanAction: string;
   focusPlanSettings: string;
   focusPlanSwitchChunk: string;
+  focusSessionContext: string;
   focusMediaYoutube: string;
   taskStore: string;
   taskUpdate: string;
@@ -84,6 +86,7 @@ export type ChunkedPageProps = {
   chunk?: Chunk;
   focusPlanId?: number;
   session?: Partial<FocusSessionState>;
+  focusHistory?: FocusHistoryDay[];
   checklistItems?: CurrentChunkChecklistItem[];
   availableChunks?: AvailableChunk[];
   nextChunk?: AvailableChunk | null;
@@ -667,6 +670,7 @@ function FocusRoutePage() {
     availableChunks={props.availableChunks ?? []}
     nextChunk={props.nextChunk ?? null}
     session={props.session}
+    focusHistory={props.focusHistory ?? []}
     nextSessionAutoStart={props.session ? {
       automaticMode: props.session.transitions === 'automatic',
       remainingTargetSeconds: props.session.remainingPlanSeconds ?? 0,
@@ -700,6 +704,11 @@ function FocusRoutePage() {
       if (!planId) return Promise.reject(new Error('The timer plan could not be found.'));
       return mutate('post', `${planBase}/${planId}/action`, { action, phase: state.phase });
     }}
+    onSaveFocusContext={(sessionId, contextNote) => mutate(
+      'patch',
+      `${routes.focusSessionContext ?? '/focus/sessions'}/${sessionId}/context`,
+      { context_note: contextNote },
+    )}
     onPlanSettingsChange={(state) => {
       if (!planId) return Promise.reject(new Error('The timer plan could not be found.'));
       return mutate('patch', `${settingsBase}/${planId}/settings`, {

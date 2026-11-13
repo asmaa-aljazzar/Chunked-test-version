@@ -188,6 +188,30 @@
 .room-panel-content { padding: 1rem 1.2rem 1.2rem; }
 .room-panel-note { margin: 0 0 .85rem; color: #c3cbbc; font-size: .72rem; line-height: 1.5; }
 .room-empty { margin: 1rem 0; color: #c6cdbf; font-size: .78rem; }
+.room-history-content { display: grid; gap: .85rem; }
+.room-history-days { display: grid; gap: .8rem; }
+.room-history-day { border-top: 1px solid rgba(238, 237, 224, .13); padding-top: .7rem; }
+.room-history-day > header, .room-history-chunk > header { display: flex; align-items: baseline; justify-content: space-between; gap: .7rem; }
+.room-history-day > header h3, .room-history-chunk > header h4 { margin: 0; color: #f2f0e5; font-size: .78rem; font-weight: 600; }
+.room-history-day > header strong { color: #dce7d4; font-family: var(--app-font-mono); font-size: .71rem; font-weight: 400; white-space: nowrap; }
+.room-history-chunk { display: grid; gap: .45rem; margin-top: .6rem; border-left: 2px solid rgba(195, 213, 184, .35); padding-left: .7rem; }
+.room-history-chunk > header h4 { color: #d5ddce; font-size: .69rem; }
+.room-history-chunk > header span { color: #c1cbbb; font-family: var(--app-font-mono); font-size: .65rem; }
+.room-history-session { border: 1px solid rgba(235, 237, 223, .13); border-radius: .7rem; padding: .6rem; background: rgba(244, 243, 229, .035); }
+.room-history-session-summary { display: flex; align-items: center; justify-content: space-between; gap: .65rem; }
+.room-history-session-summary > strong { color: #f1f0e5; font-family: var(--app-font-mono); font-size: .68rem; font-weight: 400; }
+.room-history-status { border: 1px solid rgba(196, 215, 185, .25); border-radius: 999px; padding: .2rem .5rem; color: #dce7d4; background: rgba(197, 216, 185, .08); font-size: .59rem; }
+.room-history-status.is-partial { border-color: rgba(216, 198, 155, .25); color: #e9dcb7; background: rgba(216, 198, 155, .07); }
+.room-history-status.is-abandoned { border-color: rgba(220, 203, 190, .23); color: #ded1c5; background: rgba(220, 203, 190, .06); }
+.room-history-note { display: grid; gap: .35rem; margin-top: .55rem; border-top: 1px solid rgba(235, 237, 223, .1); padding-top: .55rem; }
+.room-history-note > label { color: #d7dfd1; font-size: .62rem; }
+.room-history-note textarea { width: 100%; min-height: 3.5rem; resize: vertical; border: 1px solid rgba(236, 238, 224, .2); border-radius: .55rem; padding: .5rem .6rem; color: #f3f0e4; background: rgba(246, 244, 229, .055); font-size: .65rem; line-height: 1.45; }
+.room-history-note textarea::placeholder { color: #aab5a7; }
+.room-history-note-footer { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.room-history-note-footer small { color: #aeb9aa; font-size: .55rem; line-height: 1.35; }
+.room-history-note-footer button { min-height: 2rem; flex: 0 0 auto; border: 1px solid rgba(209, 225, 199, .35); border-radius: .55rem; padding: .35rem .55rem; color: #e2ebdb; background: rgba(197, 216, 185, .1); font-size: .61rem; cursor: pointer; }
+.room-history-note-footer button:disabled { opacity: .42; cursor: default; }
+.room-history-note-message { margin: 0; color: #c7d8bd; font-size: .6rem; }
 .room-task-cards { display: grid; gap: .65rem; }
 .room-task-card { min-width: 0; border: 1px solid rgba(235, 237, 223, .14); border-radius: .82rem; padding: .65rem .72rem .75rem; background: rgba(244, 243, 229, .035); }
 .room-task-card.parent-complete { border-color: rgba(187, 207, 176, .2); }

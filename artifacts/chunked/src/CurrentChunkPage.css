@@ -344,7 +344,7 @@
 .youtube-player iframe { display: block; width: 100%; aspect-ratio: 16/9; border: 0; }
 .room-restore { position: absolute; z-index: 8; right: max(1rem, env(safe-area-inset-right)); bottom: max(1rem, env(safe-area-inset-bottom)); display: inline-flex; align-items: center; gap: .6rem; min-height: 2.8rem; border: 1px solid rgba(236, 238, 224, .25); border-radius: 999px; padding: .6rem .95rem; color: #f4f0e4; background: rgba(24, 39, 31, .8); box-shadow: 0 8px 25px rgba(16, 27, 20, .3); backdrop-filter: blur(15px); font-size: .73rem; cursor: pointer; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; clip-path: inset(50%); }
-.focus-room button:focus-visible, .focus-room input:focus-visible, .focus-room summary:focus-visible { outline: 3px solid #d4e3c8; outline-offset: 3px; }
+.focus-room button:focus-visible, .focus-room input:focus-visible, .focus-room select:focus-visible, .focus-room textarea:focus-visible, .focus-room summary:focus-visible { outline: 3px solid #d4e3c8; outline-offset: 3px; }
 .focus-room.is-reduced-motion *, .focus-room.is-reduced-motion *::before, .focus-room.is-reduced-motion *::after {
   animation: none !important;
   transition: none !important;

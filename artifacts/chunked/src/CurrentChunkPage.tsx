@@ -219,6 +219,8 @@ export default function CurrentChunkPage({
   const boundaryRef = useRef<HTMLElement>(null);
   const leaveDialogRef = useRef<HTMLElement>(null);
   const leaveTriggerRef = useRef<HTMLElement | null>(null);
+  const panelCloseRef = useRef<HTMLButtonElement>(null);
+  const panelTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [backgroundId, setBackgroundId] = useState(selectedBackgroundId);
   const [soundId, setSoundId] = useState(selectedSoundId);
   const [soundSource, setSoundSource] = useState<FocusSoundSource>(initialSoundSource ?? (selectedSoundId ? 'library' : 'silence'));
@@ -409,6 +411,10 @@ export default function CurrentChunkPage({
     window.addEventListener('keydown', handleKeys);
     return () => window.removeEventListener('keydown', handleKeys);
   }, [boundaryVisible, hidden, leaveConfirmOpen, panel, youtubeOpen]);
+  useEffect(() => {
+    if (panel) panelCloseRef.current?.focus();
+    else panelTriggerRef.current?.focus();
+  }, [panel]);
   useEffect(() => {
     if (!boundaryVisible || !boundaryRef.current) return undefined;
     const dialog = boundaryRef.current;
@@ -903,13 +909,13 @@ export default function CurrentChunkPage({
           )}
 
           {panel && (
-            <section className={`room-panel room-panel-${panel}`} aria-label={`${panel} controls`} aria-live="polite">
+            <section id="focus-room-panel" className={`room-panel room-panel-${panel}`} aria-labelledby="focus-room-panel-heading">
               <div className="room-panel-heading">
                 <div>
                   <p className="room-panel-kicker">{panel === 'tasks' ? 'THE SMALL STEPS' : panel === 'timer' ? 'MAKE IT YOURS' : panel === 'background' ? 'A PLACE TO LAND' : 'OPTIONAL ATMOSPHERE'}</p>
-                  <h2>{panel === 'tasks' ? 'Your checklist' : panel === 'timer' ? 'Timer settings' : panel === 'background' ? 'Background' : 'Sound'}</h2>
+                  <h2 id="focus-room-panel-heading">{panel === 'tasks' ? 'Your checklist' : panel === 'timer' ? 'Timer settings' : panel === 'background' ? 'Background' : 'Sound'}</h2>
                 </div>
-                <button type="button" className="room-panel-close" onClick={() => setPanel(null)} aria-label="Close panel"><X size={18} /></button>
+                <button ref={panelCloseRef} type="button" className="room-panel-close" onClick={() => setPanel(null)} aria-label="Close panel"><X size={18} /></button>
               </div>
 
               {panel === 'tasks' && (
@@ -1010,8 +1016,8 @@ export default function CurrentChunkPage({
                   </fieldset>
                   {session.transitions === 'manual' && !session.active && !session.paused && session.status !== 'boundary' && session.status !== 'completed' && (
                     <div className="room-manual-phases" role="group" aria-label="Choose a timer phase">
-                      {session.phase === 'focus' && session.completedSessions < session.plannedSessions && <button type="button" onClick={() => startPhase('focus')} aria-pressed>Start focus</button>}
-                      {session.phase === 'break' && session.completedSessions > 0 && session.completedSessions < session.plannedSessions && <button type="button" onClick={() => startPhase('break')} aria-pressed>Start a break</button>}
+                      {session.phase === 'focus' && session.completedSessions < session.plannedSessions && <button type="button" onClick={() => startPhase('focus')}>Start focus</button>}
+                      {session.phase === 'break' && session.completedSessions > 0 && session.completedSessions < session.plannedSessions && <button type="button" onClick={() => startPhase('break')}>Start a break</button>}
                     </div>
                   )}
                   <div className="room-plan-summary" data-testid="status-plan-total">
@@ -1104,14 +1110,14 @@ export default function CurrentChunkPage({
                       </div>
                       {soundUrl && <audio ref={audioRef} src={soundUrl} loop preload="none" onError={() => { setSoundPlaying(false); setValidation('This sound could not be loaded.'); }} onPlay={() => { setSoundPlaying(true); setValidation(''); }} onPause={() => setSoundPlaying(false)} />}
                       {soundId && !soundUrl && <p className="room-sound-note" role="status">Choose a valid saved audio track to play.</p>}
-                      {soundUrl && <button className="room-subtle-action" type="button" onClick={toggleSound} data-testid="button-toggle-sound">{soundPlaying ? <><Pause size={14} /> Pause track</> : <><Play size={14} /> Play track</>}</button>}
+                      {soundUrl && <button className="room-subtle-action" type="button" onClick={toggleSound} aria-label="Library audio playback" aria-pressed={soundPlaying} data-testid="button-toggle-sound">{soundPlaying ? <><Pause size={14} /> Pause track</> : <><Play size={14} /> Play track</>}</button>}
                     </>
                   )}
 
                   {hostedVideoAudio && (
                     <div className="room-sound-selected">
                       <p className="room-sound-note">{backgroundPlaying ? 'The selected video is playing with its audio source available.' : 'The video is muted until you choose this source. Start it when you are ready.'}</p>
-                      <button className="room-subtle-action" type="button" onClick={toggleBackground} data-testid="button-toggle-video-audio">
+                      <button className="room-subtle-action" type="button" onClick={toggleBackground} aria-label="Background video audio" aria-pressed={backgroundPlaying} data-testid="button-toggle-video-audio">
                         {backgroundPlaying ? <><Pause size={14} /> Pause video</> : <><Play size={14} /> Play video with sound</>}
                       </button>
                     </div>
@@ -1144,10 +1150,10 @@ export default function CurrentChunkPage({
           )}
 
           <nav className="room-toolbar" aria-label="Room controls">
-            <button type="button" className={panel === 'tasks' ? 'active' : ''} aria-pressed={panel === 'tasks'} onClick={() => setPanel(panel === 'tasks' ? null : 'tasks')} data-testid="button-open-tasks"><ListTodo size={17} /><span>Tasks</span>{checklist.length > 0 && <small>{completedSteps}/{checklist.length}</small>}</button>
-            <button type="button" className={panel === 'timer' ? 'active' : ''} aria-pressed={panel === 'timer'} onClick={() => setPanel(panel === 'timer' ? null : 'timer')} data-testid="button-open-timer"><Settings2 size={17} /><span>Timer settings</span></button>
-            <button type="button" className={panel === 'background' ? 'active' : ''} aria-pressed={panel === 'background'} onClick={() => setPanel(panel === 'background' ? null : 'background')} data-testid="button-open-background"><Image size={17} /><span>Background</span></button>
-            <button type="button" className={panel === 'sound' ? 'active' : ''} aria-pressed={panel === 'sound'} onClick={() => setPanel(panel === 'sound' ? null : 'sound')} data-testid="button-open-sound">{soundSource === 'silence' || (muted && !youtubeSoundSource) ? <VolumeX size={17} /> : <Volume2 size={17} />}<span>Sound</span></button>
+            <button type="button" className={panel === 'tasks' ? 'active' : ''} aria-controls="focus-room-panel" aria-pressed={panel === 'tasks'} onClick={(event) => { panelTriggerRef.current = event.currentTarget; setPanel(panel === 'tasks' ? null : 'tasks'); }} data-testid="button-open-tasks"><ListTodo size={17} /><span>Tasks</span>{checklist.length > 0 && <small>{completedSteps}/{checklist.length}</small>}</button>
+            <button type="button" className={panel === 'timer' ? 'active' : ''} aria-controls="focus-room-panel" aria-pressed={panel === 'timer'} onClick={(event) => { panelTriggerRef.current = event.currentTarget; setPanel(panel === 'timer' ? null : 'timer'); }} data-testid="button-open-timer"><Settings2 size={17} /><span>Timer settings</span></button>
+            <button type="button" className={panel === 'background' ? 'active' : ''} aria-controls="focus-room-panel" aria-pressed={panel === 'background'} onClick={(event) => { panelTriggerRef.current = event.currentTarget; setPanel(panel === 'background' ? null : 'background'); }} data-testid="button-open-background"><Image size={17} /><span>Background</span></button>
+            <button type="button" className={panel === 'sound' ? 'active' : ''} aria-controls="focus-room-panel" aria-pressed={panel === 'sound'} onClick={(event) => { panelTriggerRef.current = event.currentTarget; setPanel(panel === 'sound' ? null : 'sound'); }} data-testid="button-open-sound">{soundSource === 'silence' || (muted && !youtubeSoundSource) ? <VolumeX size={17} /> : <Volume2 size={17} />}<span>Sound</span></button>
             <button type="button" onClick={() => { setPanel(null); setHidden(true); }} data-testid="button-hide-room"><X size={17} /><span>Hide</span></button>
           </nav>
         </>

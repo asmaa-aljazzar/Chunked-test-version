@@ -75,6 +75,7 @@ mysql --no-defaults --protocol=socket --socket="$DB_SOCKET" -uroot \
 cd "$LARAVEL_DIR"
 php artisan config:clear >/dev/null
 php artisan migrate --force
+php artisan db:seed --class='Database\Seeders\FocusMediaAssetSeeder' --force
 # Laravel filters child-process environment variables unless --no-reload is set.
 php artisan serve --no-reload --host=0.0.0.0 --port="${PORT:-25067}" &
 APP_PID=$!

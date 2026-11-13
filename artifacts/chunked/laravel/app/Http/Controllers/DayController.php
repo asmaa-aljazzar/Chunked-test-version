@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Chunk;
+use App\Services\FocusPlanService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -12,7 +13,7 @@ use Inertia\Response;
 
 class DayController extends Controller
 {
-    public function index(Request $request): Response|RedirectResponse
+    public function index(Request $request, FocusPlanService $focusPlans): Response|RedirectResponse
     {
         $user = $request->user();
         $settings = $user->settings;
@@ -79,6 +80,7 @@ class DayController extends Controller
                 'navigationPosition' => $settings->navigation_position,
                 'timezone' => $timezone,
             ],
+            'activeFocusTimer' => $focusPlans->activeSummary($user),
         ]);
     }
 

@@ -1,11 +1,19 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ComponentProps, type FormEvent, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type FormEvent, type ReactNode } from 'react';
 import { Link as InertiaLink, router, useForm } from '@inertiajs/react';
 import {
   ArrowDownLeft, ArrowLeft, ArrowRight, ArrowUpRight, Check, CheckCircle2,
   ChevronLeft, ChevronRight, Circle, Clock3, Coffee, Compass, Ellipsis, Menu, Play,
   Moon, Plus, Settings2, SlidersHorizontal, Sun, Trash2, X,
 } from 'lucide-react';
-import CurrentChunkPage from './CurrentChunkPage';
+import CurrentChunkPage, {
+  type AvailableChunk,
+  type CurrentChunkChecklistItem,
+  type FocusMediaEntry,
+  type FocusSoundSource,
+  type FocusSessionState,
+  type FocusTimerAction,
+  type TaskMoveDestination,
+} from './CurrentChunkPage';
 
 export type DayStructure = { type: string; name: string };
 export type Chunk = {
@@ -44,10 +52,17 @@ export type UserSettings = {
 export type ChunkedRoutes = Partial<{
   day: string;
   focus: string;
+  focusPlanAction: string;
+  focusPlanSettings: string;
+  focusPlanSwitchChunk: string;
+  focusMediaYoutube: string;
   taskStore: string;
   taskUpdate: string;
   taskComplete: string;
   taskDestroy: string;
+  taskChecklistStore: string;
+  taskChecklistUpdate: string;
+  taskChecklistDestroy: string;
   settingsUpdate: string;
   structureUpdate: string;
   structureSkip: string;
@@ -67,6 +82,13 @@ export type ChunkedPageProps = {
   date?: string;
   userKey?: string;
   chunk?: Chunk;
+  focusPlanId?: number;
+  session?: Partial<FocusSessionState>;
+  checklistItems?: CurrentChunkChecklistItem[];
+  availableChunks?: AvailableChunk[];
+  nextChunk?: AvailableChunk | null;
+  mediaCatalog?: FocusMediaEntry[];
+  activeFocusTimer?: FocusTimerSummary | null;
   selectedChunkId?: Chunk['id'] | null;
   completedCount?: number;
   current?: { type: string; name: string; chunks?: { id?: number; name: string; startTime?: string | null; endTime?: string | null }[] } | null;
@@ -168,6 +190,77 @@ function Link(props: ComponentProps<typeof InertiaLink>) {
   return <InertiaLink {...props} />;
 }
 
+type FocusTimerSummary = Partial<FocusSessionState> & {
+  planId: number;
+  date: string;
+  chunkId: number | string;
+  chunkName: string;
+  url: string;
+};
+
+type FocusMediaPreferences = {
+  backgroundId: string | null;
+  soundId: string | null;
+  soundSource: FocusSoundSource;
+  volume: number;
+  muted: boolean;
+  reduceMotion: boolean | null;
+};
+
+function miniClock(seconds: number) {
+  const safe = Math.max(0, Math.ceil(seconds));
+  return `${String(Math.floor(safe / 60)).padStart(2, '0')}:${String(safe % 60).padStart(2, '0')}`;
+}
+
+function FocusMiniTimer({ timer }: { timer?: FocusTimerSummary | null }) {
+  const [now, setNow] = useState(Date.now());
+  const lastSyncKey = useRef('');
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  const remaining = timer?.status === 'running' && timer.endsAt
+    ? Math.max(0, Math.ceil((new Date(timer.endsAt).getTime() - now) / 1000))
+    : timer?.remainingSeconds ?? 0;
+  const chunkRemaining = timer?.chunkEndsAt
+    ? Math.max(0, Math.ceil((new Date(timer.chunkEndsAt).getTime() - now) / 1000))
+    : null;
+
+  useEffect(() => {
+    if (!timer || (timer.status !== 'running' && !(timer.status === 'paused' && chunkRemaining !== null))) return;
+    const timerEnded = timer.status === 'running' && remaining <= 0;
+    const chunkEnded = chunkRemaining !== null && chunkRemaining <= 0;
+    if (!timerEnded && !chunkEnded) return;
+    const syncKey = `${timer.planId}:${timer.phase}:${timer.endsAt ?? ''}:${timer.chunkEndsAt ?? ''}`;
+    if (lastSyncKey.current === syncKey) return;
+    lastSyncKey.current = syncKey;
+    router.post(`/focus/plans/${timer.planId}/action`, { action: 'sync' }, { preserveScroll: true });
+  }, [timer, remaining, chunkRemaining]);
+
+  if (!timer) return null;
+  const detail = timer.status === 'boundary'
+    ? 'Chunk ended · choose what happens next'
+    : timer.status === 'paused'
+      ? `Paused · ${miniClock(remaining)}`
+      : `${timer.phase === 'break' ? 'Break' : 'Focus'} · ${miniClock(remaining)}`;
+
+  return <Link
+    href={timer.url}
+    className="fixed bottom-4 right-4 z-30 flex max-w-[calc(100vw-2rem)] items-center gap-3 rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-3 text-[hsl(var(--foreground))] shadow-lg no-underline transition hover:-translate-y-0.5 hover:shadow-xl sm:bottom-6 sm:right-6"
+    aria-label={`${detail}. Return to the ${timer.chunkName} focus room.`}
+    data-testid="link-focus-mini-timer"
+  >
+    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]"><Play size={14} fill="currentColor" /></span>
+    <span className="min-w-0">
+      <span className="block truncate text-[11px] font-semibold">{timer.chunkName}</span>
+      <span className="mt-0.5 block truncate text-[10px] text-muted">{detail}</span>
+    </span>
+    <span className="shrink-0 text-[10px] font-semibold text-[hsl(var(--primary))]">{timer.status === 'boundary' ? 'Continue' : 'Return'}</span>
+  </Link>;
+}
+
 function Wordmark({ onDarkSurface = false }: { onDarkSurface?: boolean }) {
   return <Link href="/" className={`flex items-center gap-2.5 no-underline ${onDarkSurface ? 'text-[hsl(var(--sidebar-foreground))]' : 'text-[hsl(var(--foreground))]'}`} aria-label="Chunked, Day">
     <span className="grid h-8 w-8 place-items-center rounded-[11px] bg-[#d9a38f] text-[#203a31]"><span className="h-3.5 w-3.5 rounded-[4px] border-[1.5px] border-current" /></span>
@@ -232,6 +325,7 @@ function AppShell({ children, current = 'day', settings, user, focusChunk, focus
       {mobileOpen && <div className="fixed inset-0 z-40 bg-[hsl(var(--sidebar))] p-6 md:hidden"><div className="flex justify-between"><Wordmark onDarkSurface /><button onClick={() => setMobileOpen(false)} className="text-white" aria-label="Close navigation"><X /></button></div><div className="mt-12">{navLinks}</div><p className="mt-10 max-w-xs text-sm leading-6 text-white/60">Your day is a guide, not a scorecard. Plans can change.</p></div>}
       <main className="main-canvas min-h-[calc(100dvh-68px)]">{children}</main>
     </div>
+    <FocusMiniTimer timer={pageProps.activeFocusTimer} />
   </div>;
 }
 
@@ -476,6 +570,25 @@ function FocusRoutePage() {
   const routes = props.routes ?? {};
   useEffect(() => setTasks(props.tasks ?? []), [props.tasks]);
 
+  const mutate = (
+    method: 'post' | 'patch' | 'delete',
+    href: string,
+    data: Record<string, string | number | boolean | null | undefined> = {},
+  ) => new Promise<void>((resolve, reject) => {
+    const options = {
+      preserveScroll: true,
+      preserveState: true,
+      onSuccess: () => resolve(),
+      onError: (errors: Record<string, string>) => {
+        const message = Object.values(errors)[0];
+        reject(new Error(message || 'This change could not be saved. Please try again.'));
+      },
+    };
+    if (method === 'post') router.post(href, data, options);
+    else if (method === 'patch') router.patch(href, data, options);
+    else router.delete(href, options);
+  });
+
   const toggleTask = (task: Task) => {
     const updated = { ...task, completedAt: task.completedAt ? null : new Date().toISOString() };
     setTasks((current) => current.map((item) => item.id === task.id ? updated : item));
@@ -487,6 +600,51 @@ function FocusRoutePage() {
   };
 
   const chunk = props.chunk ?? props.chunks?.find((item) => String(item.id) === String(props.selectedChunkId));
+  const userKey = props.userKey ?? props.user?.email ?? 'guest';
+  const preferencesKey = `chunked:focus-media:${userKey}`;
+  const [mediaPreferences, setMediaPreferences] = useState<FocusMediaPreferences>(() => {
+    const defaults: FocusMediaPreferences = { backgroundId: null, soundId: null, soundSource: 'silence', volume: 28, muted: false, reduceMotion: null };
+    if (typeof window === 'undefined') return defaults;
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(preferencesKey) ?? 'null') as Partial<FocusMediaPreferences> | null;
+      if (!saved || typeof saved !== 'object') return defaults;
+      const soundSource: FocusSoundSource = saved.soundSource === 'video' || saved.soundSource === 'library' || saved.soundSource === 'silence'
+        ? saved.soundSource
+        : defaults.soundSource;
+      const volume = Number(saved.volume);
+      return {
+        backgroundId: typeof saved.backgroundId === 'string' ? saved.backgroundId : defaults.backgroundId,
+        soundId: typeof saved.soundId === 'string' ? saved.soundId : defaults.soundId,
+        soundSource,
+        volume: Number.isFinite(volume) ? Math.max(0, Math.min(100, volume)) : defaults.volume,
+        muted: typeof saved.muted === 'boolean' ? saved.muted : defaults.muted,
+        reduceMotion: typeof saved.reduceMotion === 'boolean' ? saved.reduceMotion : null,
+      };
+    } catch {
+      return defaults;
+    }
+  });
+  const updateMediaPreferences = (patch: Partial<typeof mediaPreferences>) => {
+    setMediaPreferences((current) => {
+      const next = { ...current, ...patch };
+      try {
+        window.localStorage.setItem(preferencesKey, JSON.stringify(next));
+      } catch {
+        // Room playback remains usable if browser storage is unavailable.
+      }
+      return next;
+    });
+  };
+  const taskBase = routes.taskUpdate ?? '/tasks';
+  const taskDestroyBase = routes.taskDestroy ?? '/tasks';
+  const checklistBase = routes.taskChecklistStore ?? '/tasks';
+  const checklistUpdateBase = routes.taskChecklistUpdate ?? '/tasks';
+  const checklistDeleteBase = routes.taskChecklistDestroy ?? '/tasks';
+  const planBase = routes.focusPlanAction ?? '/focus/plans';
+  const settingsBase = routes.focusPlanSettings ?? '/focus/plans';
+  const switchBase = routes.focusPlanSwitchChunk ?? '/focus/plans';
+  const youtubeUrl = routes.focusMediaYoutube ?? '/focus/media/youtube';
+  const planId = props.focusPlanId;
   const goBack = () => {
     const date = props.today ?? props.date ?? dateKey();
     const query = new URLSearchParams({ date });
@@ -502,9 +660,61 @@ function FocusRoutePage() {
     chunk={chunk}
     tasks={tasks}
     date={props.today ?? props.date ?? dateKey()}
-    userKey={props.userKey ?? props.user?.email ?? 'guest'}
+    userKey={userKey}
     onToggleTask={toggleTask}
     onBack={goBack}
+    checklistItems={props.checklistItems ?? []}
+    availableChunks={props.availableChunks ?? []}
+    nextChunk={props.nextChunk ?? null}
+    session={props.session}
+    nextSessionAutoStart={props.session ? {
+      automaticMode: props.session.transitions === 'automatic',
+      remainingTargetSeconds: props.session.remainingPlanSeconds ?? 0,
+    } : undefined}
+    mediaCatalog={props.mediaCatalog ?? []}
+    selectedBackgroundId={mediaPreferences.backgroundId}
+    selectedSoundId={mediaPreferences.soundId}
+    soundSource={mediaPreferences.soundSource}
+    volume={mediaPreferences.volume}
+    muted={mediaPreferences.muted}
+    reduceMotion={mediaPreferences.reduceMotion}
+    onToggleChecklistItem={(item) => mutate('patch', `${checklistUpdateBase}/${item.taskId}/checklist-items/${item.id}`, { completed: item.completed })}
+    onAddChecklistItem={(taskId, title) => mutate('post', `${checklistBase}/${taskId}/checklist-items`, { title })}
+    onUpdateChecklistItem={(item) => mutate('patch', `${checklistUpdateBase}/${item.taskId}/checklist-items/${item.id}`, { title: item.title })}
+    onDeleteChecklistItem={(item) => mutate('delete', `${checklistDeleteBase}/${item.taskId}/checklist-items/${item.id}`)}
+    onMoveTask={(task, destination: TaskMoveDestination) => mutate('patch', `${taskBase}/${task.id}`, {
+      plannedDate: destination.date,
+      chunkId: destination.chunkId,
+    })}
+    onDeleteParentTask={(task) => mutate('delete', `${taskDestroyBase}/${task.id}`)}
+    onAddYouTube={(url) => mutate('post', youtubeUrl, { url })}
+    onSwitchToChunk={(nextChunk, options) => {
+      if (!planId) return Promise.reject(new Error('The timer plan could not be found.'));
+      return mutate('post', `${switchBase}/${planId}/switch-chunk`, {
+        chunk_id: nextChunk.id,
+        date: nextChunk.date,
+        auto_start: options.autoStart,
+      });
+    }}
+    onTimerAction={(action: FocusTimerAction, state) => {
+      if (!planId) return Promise.reject(new Error('The timer plan could not be found.'));
+      return mutate('post', `${planBase}/${planId}/action`, { action, phase: state.phase });
+    }}
+    onPlanSettingsChange={(state) => {
+      if (!planId) return Promise.reject(new Error('The timer plan could not be found.'));
+      return mutate('patch', `${settingsBase}/${planId}/settings`, {
+        focus_minutes: state.focusMinutes,
+        break_minutes: state.breakMinutes,
+        planned_sessions: state.plannedSessions,
+        transition_mode: state.transitions,
+      });
+    }}
+    onSelectBackground={(entry) => updateMediaPreferences({ backgroundId: entry?.id ?? null })}
+    onSelectSound={(entry) => updateMediaPreferences({ soundId: entry?.id ?? null })}
+    onSoundSourceChange={(soundSource) => updateMediaPreferences({ soundSource })}
+    onReduceMotionChange={(reduceMotion) => updateMediaPreferences({ reduceMotion })}
+    onVolumeChange={(volume) => updateMediaPreferences({ volume })}
+    onMuteChange={(muted) => updateMediaPreferences({ muted })}
   />;
 }
 

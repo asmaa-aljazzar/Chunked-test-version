@@ -63,4 +63,14 @@ class User extends Authenticatable
     {
         return $this->hasMany(Task::class);
     }
+
+    public function focusPlans(): HasMany
+    {
+        return $this->hasMany(FocusPlan::class);
+    }
+
+    public function focusSessions(): HasMany
+    {
+        return $this->hasMany(FocusSession::class);
+    }
 }

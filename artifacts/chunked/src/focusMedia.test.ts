@@ -20,3 +20,11 @@ test('only accepts direct HTTPS audio file links', () => {
   assert.equal(validateDirectAudioUrl('https://example.test/player'), null);
   assert.equal(validateDirectAudioUrl('http://cdn.example.test/lofi.mp3'), null);
 });
+
+test('accepts safe local Laravel focus media paths but rejects traversal', () => {
+  assert.equal(validateDirectVisualUrl('/storage/focus-media/room.mp4'), '/storage/focus-media/room.mp4');
+  assert.equal(validateDirectAudioUrl('/storage/focus-media/room.mp3'), '/storage/focus-media/room.mp3');
+  assert.equal(isVideoUrl('/storage/focus-media/room.mp4'), true);
+  assert.equal(validateDirectVisualUrl('/storage/focus-media/../private.mp4'), null);
+  assert.equal(validateDirectAudioUrl('/storage/private/room.mp3'), null);
+});

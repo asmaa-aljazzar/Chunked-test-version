@@ -4,12 +4,13 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use App\Services\FocusPlanService;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class SettingsController extends Controller
 {
-    public function show(Request $request): Response
+    public function show(Request $request, FocusPlanService $focusPlans): Response
     {
         $settings = $request->user()->settings()->firstOrCreate([]);
         $structure = $request->user()->dayStructure()->with('chunks')->first();
@@ -33,6 +34,7 @@ class SettingsController extends Controller
                 'sortOrder' => $chunk->sort_order,
             ])->values() ?? [],
             'today' => now($settings->timezone ?: 'Asia/Amman')->toDateString(),
+            'activeFocusTimer' => $focusPlans->activeSummary($request->user()),
         ]);
     }
 

@@ -306,6 +306,7 @@ export default function CurrentChunkPage({
   const completionHandled = useRef('');
   const boundaryRef = useRef<HTMLElement>(null);
   const leaveDialogRef = useRef<HTMLElement>(null);
+  const roomRef = useRef<HTMLElement>(null);
   const leaveTriggerRef = useRef<HTMLElement | null>(null);
   const panelCloseRef = useRef<HTMLButtonElement>(null);
   const panelTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -582,6 +583,78 @@ export default function CurrentChunkPage({
   useEffect(() => {
     if (panel) panelCloseRef.current?.focus();
     else panelTriggerRef.current?.focus();
+  }, [panel]);
+  useEffect(() => {
+    const room = roomRef.current;
+    if (!room || !panel) return undefined;
+
+    const viewport = window.visualViewport;
+    let frame = 0;
+    let blurTimeout = 0;
+    const updateKeyboardLayout = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        const activeElement = document.activeElement;
+        const textField = activeElement instanceof HTMLTextAreaElement
+          || (activeElement instanceof HTMLInputElement
+            && !['button', 'checkbox', 'file', 'hidden', 'radio', 'range', 'reset', 'submit'].includes(activeElement.type));
+
+        if (!textField) {
+          room.style.setProperty('--room-keyboard-inset', '0px');
+          room.style.removeProperty('--room-panel-max-height');
+          return;
+        }
+
+        const visibleHeight = viewport?.height ?? window.innerHeight;
+        const keyboardInset = Math.max(
+          0,
+          window.innerHeight - visibleHeight - (viewport?.offsetTop ?? 0),
+        );
+        room.style.setProperty('--room-keyboard-inset', `${keyboardInset}px`);
+        room.style.setProperty('--room-panel-max-height', `${Math.max(144, visibleHeight - 80)}px`);
+
+        const content = room.querySelector<HTMLElement>('.room-panel-content');
+        if (!content) return;
+        const form = activeElement.closest('form');
+        const target = form instanceof HTMLElement ? form : activeElement;
+        const contentRect = content.getBoundingClientRect();
+        const targetRect = target.getBoundingClientRect();
+        const margin = 12;
+
+        if (targetRect.bottom > contentRect.bottom - margin) {
+          content.scrollTop += targetRect.bottom - contentRect.bottom + margin;
+        } else if (targetRect.top < contentRect.top + margin) {
+          content.scrollTop -= contentRect.top - targetRect.top + margin;
+        }
+      });
+    };
+    const handleFocusIn = (event: FocusEvent) => {
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
+        window.clearTimeout(blurTimeout);
+        updateKeyboardLayout();
+      }
+    };
+    const handleFocusOut = () => {
+      window.clearTimeout(blurTimeout);
+      blurTimeout = window.setTimeout(updateKeyboardLayout, 100);
+    };
+
+    room.addEventListener('focusin', handleFocusIn);
+    room.addEventListener('focusout', handleFocusOut);
+    viewport?.addEventListener('resize', updateKeyboardLayout);
+    viewport?.addEventListener('scroll', updateKeyboardLayout);
+    updateKeyboardLayout();
+
+    return () => {
+      room.removeEventListener('focusin', handleFocusIn);
+      room.removeEventListener('focusout', handleFocusOut);
+      viewport?.removeEventListener('resize', updateKeyboardLayout);
+      viewport?.removeEventListener('scroll', updateKeyboardLayout);
+      window.clearTimeout(blurTimeout);
+      window.cancelAnimationFrame(frame);
+      room.style.removeProperty('--room-keyboard-inset');
+      room.style.removeProperty('--room-panel-max-height');
+    };
   }, [panel]);
   useEffect(() => {
     if (!boundaryVisible || !boundaryRef.current) return undefined;
@@ -971,7 +1044,7 @@ export default function CurrentChunkPage({
   const usableMedia = mediaCatalog.filter((entry) => entry.kind === 'audio' || entry.kind === 'video' || entry.kind === 'image');
 
   return (
-    <main className={`focus-room${hidden ? ' is-hidden' : ''}${reduceMotion ? ' is-reduced-motion' : ''}`} data-testid="focus-room">
+    <main ref={roomRef} className={`focus-room${hidden ? ' is-hidden' : ''}${reduceMotion ? ' is-reduced-motion' : ''}`} data-testid="focus-room">
       <div className={`room-backdrop${backgroundPlaying && backgroundVisual ? ' has-media' : ''}`} aria-hidden="true">
         {backgroundVisual && selectedBackground?.kind === 'image' && backgroundPlaying && !(reduceMotion && animatedImage) && (
           <img className="room-background-image" src={backgroundVisual} alt="" />

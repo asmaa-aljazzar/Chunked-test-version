@@ -167,11 +167,14 @@
 .room-panel {
   position: absolute;
   z-index: 5;
+  display: flex;
+  flex-direction: column;
   left: 50%;
-  bottom: calc(max(1.1rem, env(safe-area-inset-bottom)) + 4.1rem);
+  bottom: calc(max(1.1rem, env(safe-area-inset-bottom)) + 4.1rem + var(--room-keyboard-inset, 0px));
   width: min(440px, calc(100vw - 2rem));
   max-height: min(64dvh, 620px);
-  overflow-y: auto;
+  overflow: hidden;
+  overscroll-behavior: contain;
   transform: translateX(-50%);
   border: 1px solid rgba(241, 240, 226, .2);
   border-radius: 1.15rem;
@@ -180,12 +183,12 @@
   box-shadow: 0 18px 65px rgba(12, 24, 18, .37);
   backdrop-filter: blur(22px);
 }
-.room-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.1rem 1.2rem .9rem; border-bottom: 1px solid rgba(238, 237, 224, .13); }
+.room-panel-heading { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.1rem 1.2rem .9rem; border-bottom: 1px solid rgba(238, 237, 224, .13); }
 .room-panel-kicker { margin: 0 0 .3rem; color: #b6c9af; font-family: var(--app-font-mono); font-size: .54rem; letter-spacing: .15em; }
 .room-panel-heading h2 { margin: 0; color: #f5f1e5; font-family: var(--app-font-serif); font-size: 1.65rem; font-weight: 400; }
 .room-panel-close { width: 2.4rem; min-height: 2.4rem; padding: 0; border-color: transparent; background: transparent; }
 .room-panel-close:hover { background: rgba(243, 241, 229, .1); }
-.room-panel-content { padding: 1rem 1.2rem 1.2rem; }
+.room-panel-content { min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 1rem 1.2rem 1.2rem; }
 .room-panel-note { margin: 0 0 .85rem; color: #c3cbbc; font-size: .72rem; line-height: 1.5; }
 .room-empty { margin: 1rem 0; color: #c6cdbf; font-size: .78rem; }
 .room-history-content { display: grid; gap: .85rem; }
@@ -230,7 +233,7 @@
 .room-task-pagination button:last-child { justify-self: end; }
 .room-task-pagination button:disabled { color: #879486; border-color: rgba(232, 237, 224, .09); background: transparent; cursor: default; }
 .room-task-pagination span { color: #bec9ba; font-family: var(--app-font-mono); font-size: .61rem; white-space: nowrap; }
-.room-checklist { display: flex; max-height: 270px; flex-direction: column; gap: .18rem; overflow: auto; }
+.room-checklist { display: flex; flex-direction: column; gap: .18rem; }
 .room-check-item { display: grid; grid-template-columns: 1.15rem minmax(0, 1fr) auto; position: relative; align-items: start; gap: .72rem; padding: .8rem .3rem; color: #f1efe4; font-size: .8rem; line-height: 1.4; }
 .room-check-item > input[type="checkbox"] { position: absolute; width: 1.2rem; height: 1.2rem; margin: 0; opacity: 0; cursor: pointer; }
 .room-check-box { display: grid; width: 1.15rem; height: 1.15rem; place-items: center; border: 1px solid #a9baa1; border-radius: .35rem; color: #263a2e; background: transparent; }
@@ -384,7 +387,11 @@
   .room-toolbar button { min-width: 0; min-height: 3rem; flex-direction: column; gap: .15rem; padding: .38rem .15rem; font-size: .58rem; }
   .room-toolbar button svg { width: 17px; height: 17px; }
   .room-toolbar button small { position: absolute; top: .18rem; right: calc(50% - 1.12rem); font-size: .49rem; }
-  .room-panel { bottom: calc(max(.65rem, env(safe-area-inset-bottom)) + 3.7rem); max-height: min(60dvh, 540px); }
+  .room-panel {
+    bottom: calc(max(.65rem, env(safe-area-inset-bottom)) + 3.7rem + var(--room-keyboard-inset, 0px));
+    max-height: min(var(--room-panel-max-height, 60dvh), 540px);
+  }
+  .room-add-step input, .room-check-edit input, .room-history-note textarea { max-width: 100%; font-size: 16px; }
 }
 @media (max-width: 420px) {
   .room-header { padding-inline: .75rem; }
@@ -437,7 +444,7 @@
   .room-toolbar { bottom: max(.4rem, env(safe-area-inset-bottom)); }
   .room-panel {
     bottom: calc(max(.4rem, env(safe-area-inset-bottom)) + 3.7rem);
-    max-height: min(56dvh, 250px);
+    max-height: min(var(--room-panel-max-height, 56dvh), 250px);
     overflow-x: hidden;
   }
   .room-panel-content { min-width: 0; }

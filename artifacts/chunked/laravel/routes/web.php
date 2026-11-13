@@ -4,7 +4,6 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\DayController;
 use App\Http\Controllers\FocusController;
-use App\Http\Controllers\FocusMediaController;
 use App\Http\Controllers\FocusPlanController;
 use App\Http\Controllers\ChecklistItemController;
 use App\Http\Controllers\OnboardingController;
@@ -28,7 +27,6 @@ Route::middleware('auth')->group(function () {
     Route::post('/focus/plans/{plan}/action', [FocusPlanController::class, 'action'])->name('focus.plans.action');
     Route::patch('/focus/sessions/{session}/context', [FocusPlanController::class, 'updateSessionContext'])->name('focus.sessions.context');
     Route::post('/focus/plans/{plan}/switch-chunk', [FocusPlanController::class, 'switchChunk'])->name('focus.plans.switch-chunk');
-    Route::post('/focus/media/youtube', [FocusMediaController::class, 'storeYoutube'])->name('focus.media.youtube');
     Route::get('/onboarding', [OnboardingController::class, 'index'])->name('onboarding.index');
     Route::post('/onboarding', [OnboardingController::class, 'store'])->name('onboarding.store');
     Route::post('/onboarding/skip', [OnboardingController::class, 'skip'])->name('onboarding.skip');

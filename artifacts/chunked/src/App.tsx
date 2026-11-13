@@ -10,6 +10,7 @@ import CurrentChunkPage, {
   type CurrentChunkChecklistItem,
   type FocusHistoryDay,
   type FocusMediaEntry,
+  type FocusSessionCueSettings,
   type FocusSoundSource,
   type FocusSessionState,
   type FocusTimerAction,
@@ -57,7 +58,6 @@ export type ChunkedRoutes = Partial<{
   focusPlanSettings: string;
   focusPlanSwitchChunk: string;
   focusSessionContext: string;
-  focusMediaYoutube: string;
   taskStore: string;
   taskUpdate: string;
   taskComplete: string;
@@ -205,6 +205,7 @@ type FocusMediaPreferences = {
   backgroundId: string | null;
   soundId: string | null;
   soundSource: FocusSoundSource;
+  sessionCues: FocusSessionCueSettings;
   volume: number;
   muted: boolean;
   reduceMotion: boolean | null;
@@ -606,7 +607,7 @@ function FocusRoutePage() {
   const userKey = props.userKey ?? props.user?.email ?? 'guest';
   const preferencesKey = `chunked:focus-media:${userKey}`;
   const [mediaPreferences, setMediaPreferences] = useState<FocusMediaPreferences>(() => {
-    const defaults: FocusMediaPreferences = { backgroundId: null, soundId: null, soundSource: 'silence', volume: 28, muted: false, reduceMotion: null };
+    const defaults: FocusMediaPreferences = { backgroundId: null, soundId: null, soundSource: 'silence', sessionCues: { start: false, end: false }, volume: 28, muted: false, reduceMotion: null };
     if (typeof window === 'undefined') return defaults;
     try {
       const saved = JSON.parse(window.localStorage.getItem(preferencesKey) ?? 'null') as Partial<FocusMediaPreferences> | null;
@@ -615,10 +616,15 @@ function FocusRoutePage() {
         ? saved.soundSource
         : defaults.soundSource;
       const volume = Number(saved.volume);
+      const savedCues = saved.sessionCues;
       return {
         backgroundId: typeof saved.backgroundId === 'string' ? saved.backgroundId : defaults.backgroundId,
         soundId: typeof saved.soundId === 'string' ? saved.soundId : defaults.soundId,
         soundSource,
+        sessionCues: {
+          start: typeof savedCues?.start === 'boolean' ? savedCues.start : defaults.sessionCues.start,
+          end: typeof savedCues?.end === 'boolean' ? savedCues.end : defaults.sessionCues.end,
+        },
         volume: Number.isFinite(volume) ? Math.max(0, Math.min(100, volume)) : defaults.volume,
         muted: typeof saved.muted === 'boolean' ? saved.muted : defaults.muted,
         reduceMotion: typeof saved.reduceMotion === 'boolean' ? saved.reduceMotion : null,
@@ -646,7 +652,6 @@ function FocusRoutePage() {
   const planBase = routes.focusPlanAction ?? '/focus/plans';
   const settingsBase = routes.focusPlanSettings ?? '/focus/plans';
   const switchBase = routes.focusPlanSwitchChunk ?? '/focus/plans';
-  const youtubeUrl = routes.focusMediaYoutube ?? '/focus/media/youtube';
   const planId = props.focusPlanId;
   const goBack = () => {
     const date = props.today ?? props.date ?? dateKey();
@@ -679,6 +684,7 @@ function FocusRoutePage() {
     selectedBackgroundId={mediaPreferences.backgroundId}
     selectedSoundId={mediaPreferences.soundId}
     soundSource={mediaPreferences.soundSource}
+    sessionCues={mediaPreferences.sessionCues}
     volume={mediaPreferences.volume}
     muted={mediaPreferences.muted}
     reduceMotion={mediaPreferences.reduceMotion}
@@ -691,7 +697,6 @@ function FocusRoutePage() {
       chunkId: destination.chunkId,
     })}
     onDeleteParentTask={(task) => mutate('delete', `${taskDestroyBase}/${task.id}`)}
-    onAddYouTube={(url) => mutate('post', youtubeUrl, { url })}
     onSwitchToChunk={(nextChunk, options) => {
       if (!planId) return Promise.reject(new Error('The timer plan could not be found.'));
       return mutate('post', `${switchBase}/${planId}/switch-chunk`, {
@@ -721,6 +726,7 @@ function FocusRoutePage() {
     onSelectBackground={(entry) => updateMediaPreferences({ backgroundId: entry?.id ?? null })}
     onSelectSound={(entry) => updateMediaPreferences({ soundId: entry?.id ?? null })}
     onSoundSourceChange={(soundSource) => updateMediaPreferences({ soundSource })}
+    onSessionCuesChange={(sessionCues) => updateMediaPreferences({ sessionCues })}
     onReduceMotionChange={(reduceMotion) => updateMediaPreferences({ reduceMotion })}
     onVolumeChange={(volume) => updateMediaPreferences({ volume })}
     onMuteChange={(muted) => updateMediaPreferences({ muted })}

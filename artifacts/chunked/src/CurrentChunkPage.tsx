@@ -4,6 +4,7 @@ import {
   History, Play, RotateCcw, Settings2, Trash2, Volume2, VolumeX, X,
 } from 'lucide-react';
 import { isVideoUrl, validateDirectAudioUrl, validateDirectVisualUrl } from './focusMedia';
+import { getFocusSessionCueEvents, type FocusSessionCueSnapshot } from './sessionCues';
 import './CurrentChunkPage.css';
 
 export type CurrentChunk = {
@@ -38,11 +39,12 @@ export type FocusMediaEntry = {
   id: string;
   title: string;
   url: string;
-  kind: 'audio' | 'video' | 'image' | 'youtube';
+  kind: 'audio' | 'video' | 'image';
   thumbnailUrl?: string;
 };
 
 export type FocusSoundSource = 'video' | 'library' | 'silence';
+export type FocusSessionCueSettings = { start: boolean; end: boolean };
 
 export type FocusHistorySession = {
   id: number;
@@ -112,6 +114,7 @@ export type CurrentChunkPageProps = {
   selectedBackgroundId?: string | null;
   selectedSoundId?: string | null;
   soundSource?: FocusSoundSource;
+  sessionCues?: FocusSessionCueSettings;
   volume?: number;
   muted?: boolean;
   reduceMotion?: boolean | null;
@@ -121,7 +124,6 @@ export type CurrentChunkPageProps = {
   onDeleteChecklistItem?: (item: CurrentChunkChecklistItem) => void | Promise<void>;
   onMoveTask?: (task: CurrentChunkTask, destination: TaskMoveDestination) => void | Promise<void>;
   onDeleteParentTask?: (task: CurrentChunkTask) => void | Promise<void>;
-  onAddYouTube?: (url: string) => void | Promise<void>;
   onSwitchToChunk?: (chunk: AvailableChunk, options: { autoStart: boolean; remainingTargetSeconds: number }) => void | Promise<void>;
   onSessionChange?: (session: FocusSessionState) => void;
   onTimerAction?: (action: FocusTimerAction, session: FocusSessionState) => void | Promise<void>;
@@ -130,6 +132,7 @@ export type CurrentChunkPageProps = {
   onSelectBackground?: (entry: FocusMediaEntry | null) => void;
   onSelectSound?: (entry: FocusMediaEntry | null) => void;
   onSoundSourceChange?: (source: FocusSoundSource) => void;
+  onSessionCuesChange?: (settings: FocusSessionCueSettings) => void;
   onVolumeChange?: (volume: number) => void;
   onMuteChange?: (muted: boolean) => void;
   onReduceMotionChange?: (reduceMotion: boolean) => void;
@@ -178,31 +181,6 @@ function chunkEndTimestamp(endTime?: string | null, explicit?: string | number |
   if (Number.isNaN(end.getTime())) return null;
   end.setHours(hours, minutes, 0, 0);
   return end.getTime();
-}
-
-function youtubeVideoId(raw: string) {
-  try {
-    const url = new URL(raw);
-    const supportedHosts = new Set(['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com', 'youtu.be']);
-    if (url.protocol !== 'https:' || url.username || url.password || !supportedHosts.has(url.hostname.toLowerCase())) return null;
-    let id = '';
-    if (url.hostname === 'youtu.be') id = url.pathname.slice(1);
-    if (url.hostname.toLowerCase() !== 'youtu.be') {
-      if (url.pathname === '/watch') id = url.searchParams.get('v') || '';
-      else {
-        const parts = url.pathname.split('/').filter(Boolean);
-        if (['embed', 'shorts', 'live'].includes(parts[0] || '')) id = parts[1] || '';
-      }
-    }
-    return /^[\w-]{11}$/.test(id) ? id : null;
-  } catch {
-    return null;
-  }
-}
-
-function youtubeEmbedUrl(raw: string) {
-  const id = youtubeVideoId(raw);
-  return id ? `https://www.youtube-nocookie.com/embed/${id}?controls=1&rel=0` : null;
 }
 
 function formatPlanDuration(totalSeconds: number) {
@@ -291,13 +269,23 @@ export default function CurrentChunkPage({
   chunk, tasks, date, onToggleTask, onBack, checklistItems = [], availableChunks = [], nextChunk = null,
   session: sessionProps, focusHistory = [], nextSessionAutoStart, onTimerAction, onSaveFocusContext, onPlanSettingsChange,
   mediaCatalog = [], selectedBackgroundId = null, selectedSoundId = null, volume: initialVolume = 28,
-  soundSource: initialSoundSource, muted: initialMuted = false, reduceMotion: reduceMotionProp,
-  onToggleChecklistItem, onAddChecklistItem, onAddYouTube,
+  soundSource: initialSoundSource, sessionCues: initialSessionCues = { start: false, end: false },
+  muted: initialMuted = false, reduceMotion: reduceMotionProp,
+  onToggleChecklistItem, onAddChecklistItem,
   onUpdateChecklistItem, onDeleteChecklistItem, onMoveTask, onDeleteParentTask, onSwitchToChunk, onSessionChange,
-  onSelectBackground, onSelectSound, onSoundSourceChange, onVolumeChange, onMuteChange, onReduceMotionChange,
+  onSelectBackground, onSelectSound, onSoundSourceChange, onSessionCuesChange, onVolumeChange, onMuteChange, onReduceMotionChange,
 }: CurrentChunkPageProps) {
   const [session, setSession] = useState<FocusSessionState>(() => ({ ...INITIAL_SESSION, ...sessionProps }));
   const [remaining, setRemaining] = useState(() => Math.max(0, session.targetSeconds - session.progressSeconds));
+  const sessionCueStateRef = useRef<FocusSessionCueSnapshot>({
+    active: Boolean(session.active),
+    paused: Boolean(session.paused),
+    phase: session.phase,
+    status: session.status ?? 'ready',
+    sessionId: session.sessionId ?? null,
+    remainingSeconds: session.remainingSeconds ?? Math.max(0, session.targetSeconds - session.progressSeconds),
+  });
+  const cueAudioContextRef = useRef<AudioContext | null>(null);
   const [now, setNow] = useState(Date.now());
   const [panel, setPanel] = useState<Panel>(null);
   const [hidden, setHidden] = useState(false);
@@ -321,9 +309,15 @@ export default function CurrentChunkPage({
   const leaveTriggerRef = useRef<HTMLElement | null>(null);
   const panelCloseRef = useRef<HTMLButtonElement>(null);
   const panelTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const [backgroundId, setBackgroundId] = useState(selectedBackgroundId);
+  const initialBackground = mediaCatalog.find((entry) => (
+    entry.id === selectedBackgroundId && (entry.kind === 'video' || entry.kind === 'image')
+  )) ?? null;
+  const [backgroundId, setBackgroundId] = useState(initialBackground?.id ?? null);
   const [soundId, setSoundId] = useState(selectedSoundId);
-  const [soundSource, setSoundSource] = useState<FocusSoundSource>(initialSoundSource ?? (selectedSoundId ? 'library' : 'silence'));
+  const [soundSource, setSoundSource] = useState<FocusSoundSource>(() => {
+    const source = initialSoundSource ?? (selectedSoundId ? 'library' : 'silence');
+    return source === 'video' && initialBackground?.kind !== 'video' ? 'silence' : source;
+  });
   const [volume, setVolume] = useState(initialVolume);
   const [muted, setMuted] = useState(initialMuted);
   const [reduceMotion, setReduceMotion] = useState(() => {
@@ -333,9 +327,6 @@ export default function CurrentChunkPage({
   const [hasSavedMotionChoice, setHasSavedMotionChoice] = useState(typeof reduceMotionProp === 'boolean');
   const [soundPlaying, setSoundPlaying] = useState(false);
   const [backgroundPlaying, setBackgroundPlaying] = useState(false);
-  const [youtubeOpen, setYoutubeOpen] = useState(false);
-  const [youtubeDraft, setYoutubeDraft] = useState('');
-  const [youtubeMessage, setYoutubeMessage] = useState('');
   const [validation, setValidation] = useState('');
   const [switchingChunks, setSwitchingChunks] = useState(false);
   const backgroundVideoRef = useRef<HTMLVideoElement>(null);
@@ -351,14 +342,65 @@ export default function CurrentChunkPage({
     ? selectedBackground.url
     : selectedBackground?.kind === 'image' ? validateDirectVisualUrl(selectedBackground.url) : null;
   const animatedImage = Boolean(selectedBackground?.kind === 'image' && /\.gif(?:$|[?#])/i.test(selectedBackground.url));
-  const youtubeUrl = selectedBackground?.kind === 'youtube' ? youtubeEmbedUrl(selectedBackground.url) : null;
   const soundUrl = selectedSound?.kind === 'audio' ? validateDirectAudioUrl(selectedSound.url) : null;
   const librarySounds = mediaCatalog.filter((entry) => entry.kind === 'audio' && validateDirectAudioUrl(entry.url));
-  const hasVideoSound = selectedBackground?.kind === 'video' || selectedBackground?.kind === 'youtube';
-  const youtubeSoundSource = soundSource === 'video' && selectedBackground?.kind === 'youtube';
+  const hasVideoSound = selectedBackground?.kind === 'video';
   const hostedVideoAudio = soundSource === 'video' && selectedBackground?.kind === 'video';
+  const hasRoomMuteControl = (soundSource === 'library' && Boolean(soundUrl)) || hostedVideoAudio;
   const chunkRemaining = endAt === null ? null : Math.max(0, Math.ceil((endAt - now) / 1000));
   const progress = session.targetSeconds ? Math.min(100, Math.max(0, (session.progressSeconds + (session.active && !session.paused ? session.targetSeconds - session.progressSeconds - remaining : 0)) / session.targetSeconds * 100)) : 0;
+
+  const getCueAudioContext = () => {
+    if (typeof window === 'undefined' || typeof window.AudioContext !== 'function') return null;
+    if (!cueAudioContextRef.current || cueAudioContextRef.current.state === 'closed') {
+      cueAudioContextRef.current = new window.AudioContext();
+    }
+    return cueAudioContextRef.current;
+  };
+  const primeSessionCueAudio = () => {
+    if (!initialSessionCues.start && !initialSessionCues.end) return;
+    const context = getCueAudioContext();
+    if (!context) {
+      setValidation('Session sounds are not available in this browser.');
+      return;
+    }
+    if (context.state === 'suspended') void context.resume().catch(() => {
+      setValidation('The browser could not enable session sounds.');
+    });
+  };
+  const playSessionCue = useCallback((cue: 'start' | 'end') => {
+    if (!initialSessionCues[cue]) return;
+    const context = getCueAudioContext();
+    if (!context) {
+      setValidation('Session sounds are not available in this browser.');
+      return;
+    }
+    const play = () => {
+      const notes = cue === 'start' ? [523.25, 659.25] : [659.25, 523.25];
+      const origin = context.currentTime + 0.015;
+      notes.forEach((frequency, index) => {
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+        const noteStart = origin + index * 0.13;
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(frequency, noteStart);
+        gain.gain.setValueAtTime(0.0001, noteStart);
+        gain.gain.exponentialRampToValueAtTime(0.075, noteStart + 0.025);
+        gain.gain.exponentialRampToValueAtTime(0.0001, noteStart + 0.22);
+        oscillator.connect(gain);
+        gain.connect(context.destination);
+        oscillator.start(noteStart);
+        oscillator.stop(noteStart + 0.24);
+      });
+    };
+    if (context.state === 'suspended') {
+      void context.resume().then(play).catch(() => {
+        setValidation('The browser could not play the session sound.');
+      });
+    } else {
+      play();
+    }
+  }, [initialSessionCues.start, initialSessionCues.end]);
 
   const publishSession = useCallback((next: FocusSessionState, action?: FocusTimerAction) => {
     setSession(next);
@@ -371,8 +413,11 @@ export default function CurrentChunkPage({
   }, [onSessionChange, onTimerAction]);
 
   useEffect(() => {
-    setBackgroundId(selectedBackgroundId);
-  }, [selectedBackgroundId]);
+    const nextBackground = mediaCatalog.find((entry) => (
+      entry.id === selectedBackgroundId && (entry.kind === 'video' || entry.kind === 'image')
+    ));
+    setBackgroundId(nextBackground?.id ?? null);
+  }, [selectedBackgroundId, mediaCatalog]);
   useEffect(() => {
     setTaskPage((current) => Math.min(current, Math.max(0, taskPageCount - 1)));
   }, [taskPageCount]);
@@ -383,12 +428,15 @@ export default function CurrentChunkPage({
   }, [selectedSoundId]);
   useEffect(() => {
     if (initialSoundSource !== undefined) {
-      setSoundSource(initialSoundSource);
+      const nextSource = initialSoundSource === 'video' && selectedBackground?.kind !== 'video'
+        ? 'silence'
+        : initialSoundSource;
+      setSoundSource(nextSource);
+      if (nextSource !== initialSoundSource) onSoundSourceChange?.(nextSource);
       setSoundPlaying(false);
       if (audioRef.current) audioRef.current.pause();
-      if (initialSoundSource !== 'video') setYoutubeOpen(false);
     }
-  }, [initialSoundSource]);
+  }, [initialSoundSource, selectedBackground?.kind]);
   useEffect(() => {
     if (reduceMotionProp === undefined || reduceMotionProp === null) {
       setHasSavedMotionChoice(false);
@@ -418,7 +466,6 @@ export default function CurrentChunkPage({
       setBackgroundPlaying(false);
     }
     if (animatedImage) setBackgroundPlaying(false);
-    setYoutubeOpen(false);
   }, [reduceMotion, animatedImage, selectedBackground?.id]);
   useEffect(() => setVolume(initialVolume), [initialVolume]);
   useEffect(() => setMuted(initialMuted), [initialMuted]);
@@ -431,6 +478,28 @@ export default function CurrentChunkPage({
       boundaryHandled.current = true;
     }
   }, [sessionSignature]);
+  useEffect(() => {
+    const current: FocusSessionCueSnapshot = {
+      active: Boolean(session.active),
+      paused: Boolean(session.paused),
+      phase: session.phase,
+      status: session.status ?? 'ready',
+      sessionId: session.sessionId ?? null,
+      remainingSeconds: session.remainingSeconds ?? Math.max(0, session.targetSeconds - session.progressSeconds),
+    };
+    const events = getFocusSessionCueEvents(sessionCueStateRef.current, current);
+    if (events.end) playSessionCue('end');
+    if (events.start) playSessionCue('start');
+    sessionCueStateRef.current = current;
+  }, [
+    session.active, session.paused, session.phase, session.status, session.sessionId,
+    session.remainingSeconds, session.targetSeconds, session.progressSeconds, playSessionCue,
+  ]);
+  useEffect(() => () => {
+    const context = cueAudioContextRef.current;
+    if (context && context.state !== 'closed') void context.close().catch(() => {});
+    cueAudioContextRef.current = null;
+  }, []);
   useEffect(() => {
     const clock = window.setInterval(() => {
       const currentTime = Date.now();
@@ -497,12 +566,11 @@ export default function CurrentChunkPage({
         }
         if (boundaryVisible) return;
         if (panel) { setPanel(null); event.preventDefault(); }
-        else if (youtubeOpen) setYoutubeOpen(false);
         else if (!hidden) setHidden(true);
         return;
       }
       const target = event.target as HTMLElement | null;
-      if (event.code === 'Space' && !panel && !youtubeOpen && target?.tagName !== 'BUTTON'
+      if (event.code === 'Space' && !panel && target?.tagName !== 'BUTTON'
         && target?.tagName !== 'INPUT' && target?.tagName !== 'TEXTAREA') {
         event.preventDefault();
         toggleSession();
@@ -510,7 +578,7 @@ export default function CurrentChunkPage({
     };
     window.addEventListener('keydown', handleKeys);
     return () => window.removeEventListener('keydown', handleKeys);
-  }, [boundaryVisible, hidden, leaveConfirmOpen, panel, youtubeOpen]);
+  }, [boundaryVisible, hidden, leaveConfirmOpen, panel]);
   useEffect(() => {
     if (panel) panelCloseRef.current?.focus();
     else panelTriggerRef.current?.focus();
@@ -593,6 +661,7 @@ export default function CurrentChunkPage({
       return;
     }
     const resume = session.paused;
+    if (session.phase === 'focus') primeSessionCueAudio();
     const targetSeconds = session.phase === 'focus' ? session.focusMinutes * 60 : session.breakMinutes * 60;
     const nextRemaining = resume ? remaining : targetSeconds;
     const next = {
@@ -624,6 +693,7 @@ export default function CurrentChunkPage({
     publishSession(next, 'reset');
   };
   const startPhase = (phase: 'focus' | 'break') => {
+    if (phase === 'focus') primeSessionCueAudio();
     const targetSeconds = (phase === 'focus' ? session.focusMinutes : session.breakMinutes) * 60;
     const next = {
       ...session,
@@ -683,16 +753,13 @@ export default function CurrentChunkPage({
       audioRef.current.currentTime = 0;
     }
     setSoundPlaying(false);
-    if (source !== 'video') setYoutubeOpen(false);
-    if (source === 'silence') setYoutubeOpen(false);
   };
   const selectBackground = (entry: FocusMediaEntry | null) => {
     const nextId = entry?.id ?? null;
     setBackgroundId(nextId);
     setBackgroundPlaying(false);
-    setYoutubeOpen(false);
     setValidation('');
-    if (soundSource === 'video' && entry?.kind !== 'video' && entry?.kind !== 'youtube') chooseSoundSource('silence');
+    if (soundSource === 'video' && entry?.kind !== 'video') chooseSoundSource('silence');
     onSelectBackground?.(entry);
   };
   const selectSound = (entry: FocusMediaEntry | null) => {
@@ -707,17 +774,8 @@ export default function CurrentChunkPage({
     }
   };
   const toggleBackground = async () => {
-    if (reduceMotion && (selectedBackground?.kind === 'video' || selectedBackground?.kind === 'youtube' || animatedImage)) {
+    if (reduceMotion && (selectedBackground?.kind === 'video' || animatedImage)) {
       setValidation('Turn off Reduce motion before playing moving background media.');
-      return;
-    }
-    if (selectedBackground?.kind === 'youtube') {
-      if (soundSource !== 'video') {
-        setValidation('Choose the selected video / YouTube source in Sound before opening this player.');
-        return;
-      }
-      if (!youtubeUrl) { setValidation('This YouTube link could not be opened.'); return; }
-      setYoutubeOpen((open) => !open);
       return;
     }
     if (selectedBackground?.kind === 'video' && backgroundVideoRef.current) {
@@ -871,23 +929,6 @@ export default function CurrentChunkPage({
       });
     });
   };
-  const submitYouTube = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!onAddYouTube) return;
-    const id = youtubeVideoId(youtubeDraft.trim());
-    if (!id) {
-      setYoutubeMessage('Use an HTTPS YouTube or youtu.be link with a valid video ID.');
-      return;
-    }
-    const normalizedUrl = `https://www.youtube.com/watch?v=${id}`;
-    setYoutubeMessage('');
-    void Promise.resolve().then(() => onAddYouTube(normalizedUrl)).then(() => {
-      setYoutubeDraft('');
-      setYoutubeMessage('Link submitted. It will appear here after it is saved.');
-    }).catch(() => {
-      setYoutubeMessage('This link could not be added. Please try again.');
-    });
-  };
   const proceedToNextChunk = () => {
     if (!nextChunk || !canSwitchToNext || !onSwitchToChunk || switchingChunks) return;
     const permittedTarget = Math.max(0, nextSessionAutoStart?.remainingTargetSeconds ?? 0);
@@ -927,7 +968,7 @@ export default function CurrentChunkPage({
   const unfinishedTasks = tasks.filter((task) => !task.completedAt);
   const unresolvedTasks = unfinishedTasks.filter((task) => !resolvedTaskIds.has(String(task.id)));
   const canSwitchToNext = Boolean(nextChunk && onSwitchToChunk && unresolvedTasks.length === 0);
-  const usableMedia = mediaCatalog.filter((entry) => entry.kind === 'audio' || entry.kind === 'video' || entry.kind === 'image' || entry.kind === 'youtube');
+  const usableMedia = mediaCatalog.filter((entry) => entry.kind === 'audio' || entry.kind === 'video' || entry.kind === 'image');
 
   return (
     <main className={`focus-room${hidden ? ' is-hidden' : ''}${reduceMotion ? ' is-reduced-motion' : ''}`} data-testid="focus-room">
@@ -948,6 +989,18 @@ export default function CurrentChunkPage({
         )}
       </div>
       <div className="room-wash" aria-hidden="true" />
+      {soundUrl && (
+        <audio
+          ref={audioRef}
+          src={soundUrl}
+          loop
+          preload="none"
+          aria-hidden="true"
+          onError={() => { setSoundPlaying(false); setValidation('This sound could not be loaded.'); }}
+          onPlay={() => { setSoundPlaying(true); setValidation(''); }}
+          onPause={() => setSoundPlaying(false)}
+        />
+      )}
 
       {!hidden && (
         <>
@@ -997,16 +1050,6 @@ export default function CurrentChunkPage({
             </div>
             <p className="room-session-count" data-testid="text-session-count">{session.completedSessions} of {session.plannedSessions} sessions · {session.transitions === 'automatic' ? 'breaks included' : 'at your pace'}</p>
           </section>
-
-          {youtubeOpen && youtubeUrl && selectedBackground && (
-            <section className="youtube-player" aria-label={`${selectedBackground.title} YouTube player`}>
-              <div className="youtube-player-head">
-                <span>{selectedBackground.title}</span>
-                <button type="button" onClick={() => setYoutubeOpen(false)} aria-label="Close YouTube player"><X size={17} /></button>
-              </div>
-              <iframe src={youtubeUrl} title={`${selectedBackground.title} player`} allow="encrypted-media; picture-in-picture" allowFullScreen />
-            </section>
-          )}
 
           {panel && (
             <section id="focus-room-panel" className={`room-panel room-panel-${panel}`} aria-labelledby="focus-room-panel-heading">
@@ -1174,30 +1217,20 @@ export default function CurrentChunkPage({
 
               {panel === 'background' && (
                 <div className="room-panel-content">
-                  <p className="room-panel-note">Only saved media can sit behind the room. YouTube stays in its own player with controls.</p>
+                  <p className="room-panel-note">Choose a saved image or video for the room background.</p>
                   <div className="room-media-list">
-                    <button type="button" className={`room-media-option${!backgroundId ? ' selected' : ''}`} aria-pressed={!backgroundId} onClick={() => selectBackground(null)} data-testid="button-background-still">
+                    <button type="button" className={`room-media-option${!selectedBackground ? ' selected' : ''}`} aria-pressed={!selectedBackground} onClick={() => selectBackground(null)} data-testid="button-background-still">
                       <span className="room-media-swatch room-media-none" aria-hidden="true"><Image size={15} /></span><span>Still background · Chunked theme</span>
                     </button>
-                    {usableMedia.filter((entry) => entry.kind === 'video' || entry.kind === 'image' || entry.kind === 'youtube').map((entry) => (
+                    {usableMedia.filter((entry) => entry.kind === 'video' || entry.kind === 'image').map((entry) => (
                       <button type="button" key={entry.id} className={`room-media-option${backgroundId === entry.id ? ' selected' : ''}`} aria-pressed={backgroundId === entry.id} onClick={() => selectBackground(entry)}>
-                        <span className="room-media-swatch" aria-hidden="true">{entry.thumbnailUrl && <img src={entry.thumbnailUrl} alt="" />}{entry.kind === 'youtube' ? 'YT' : entry.kind === 'video' ? 'MOV' : 'IMG'}</span>
-                        <span>{entry.title}<small>{entry.kind === 'youtube' ? 'Separate player' : 'Room background'}</small></span>
+                        <span className="room-media-swatch" aria-hidden="true">{entry.thumbnailUrl && <img src={entry.thumbnailUrl} alt="" />}{entry.kind === 'video' ? 'MOV' : 'IMG'}</span>
+                        <span>{entry.title}<small>Room background</small></span>
                       </button>
                     ))}
                   </div>
-                  <form className="room-youtube-form" onSubmit={submitYouTube}>
-                    <label htmlFor="focus-youtube-url">Add a YouTube link</label>
-                    <div className="room-youtube-entry">
-                      <input id="focus-youtube-url" type="url" value={youtubeDraft} onChange={(event) => { setYoutubeDraft(event.target.value); setYoutubeMessage(''); }} placeholder="https://youtu.be/…" disabled={!onAddYouTube} data-testid="input-youtube-url" />
-                      <button type="submit" disabled={!onAddYouTube || !youtubeDraft.trim()} data-testid="button-add-youtube">Add link</button>
-                    </div>
-                    <p className={`room-youtube-message${youtubeMessage && !youtubeMessage.startsWith('Link submitted') ? ' is-error' : ''}`} role="status">{youtubeMessage || (!onAddYouTube ? 'YouTube links will be available when this room is connected.' : 'Supported YouTube and youtu.be links open separately with native controls.')}</p>
-                  </form>
-                  {selectedBackground && <button className="room-subtle-action" type="button" disabled={(selectedBackground.kind === 'youtube' && soundSource !== 'video') || (reduceMotion && (selectedBackground.kind === 'video' || selectedBackground.kind === 'youtube' || animatedImage))} onClick={toggleBackground} data-testid="button-toggle-background">
-                    {selectedBackground.kind === 'youtube'
-                      ? (reduceMotion ? 'Paused by Reduce motion' : soundSource !== 'video' ? 'Choose YouTube in Sound first' : youtubeOpen ? 'Close player' : 'Open YouTube player')
-                      : reduceMotion && (selectedBackground.kind === 'video' || animatedImage) ? 'Paused by Reduce motion' : backgroundPlaying ? 'Pause background' : 'Show background'}
+                  {selectedBackground && <button className="room-subtle-action" type="button" disabled={reduceMotion && (selectedBackground.kind === 'video' || animatedImage)} onClick={toggleBackground} data-testid="button-toggle-background">
+                    {reduceMotion && (selectedBackground.kind === 'video' || animatedImage) ? 'Paused by Reduce motion' : backgroundPlaying ? 'Pause background' : 'Show background'}
                   </button>}
                   <div className="room-motion-setting">
                     <div>
@@ -1219,7 +1252,7 @@ export default function CurrentChunkPage({
                     <legend>Sound source</legend>
                     <label className={!hasVideoSound ? 'is-unavailable' : ''}>
                       <input type="radio" name="room-sound-source" value="video" checked={soundSource === 'video'} disabled={!hasVideoSound} onChange={() => chooseSoundSource('video')} />
-                      <span><strong>Selected video / YouTube</strong><small>{selectedBackground ? selectedBackground.title : 'Choose a hosted video or YouTube player in Background'}</small></span>
+                      <span><strong>Selected video</strong><small>{selectedBackground?.kind === 'video' ? selectedBackground.title : 'Choose a saved video in Background'}</small></span>
                     </label>
                     <label className={!librarySounds.length ? 'is-unavailable' : ''}>
                       <input type="radio" name="room-sound-source" value="library" checked={soundSource === 'library'} disabled={!librarySounds.length} onChange={() => chooseSoundSource('library')} />
@@ -1240,7 +1273,6 @@ export default function CurrentChunkPage({
                           </button>
                         )) : <p className="room-empty">No library tracks are available.</p>}
                       </div>
-                      {soundUrl && <audio ref={audioRef} src={soundUrl} loop preload="none" onError={() => { setSoundPlaying(false); setValidation('This sound could not be loaded.'); }} onPlay={() => { setSoundPlaying(true); setValidation(''); }} onPause={() => setSoundPlaying(false)} />}
                       {soundId && !soundUrl && <p className="room-sound-note" role="status">Choose a valid saved audio track to play.</p>}
                       {soundUrl && <button className="room-subtle-action" type="button" onClick={toggleSound} aria-label="Library audio playback" aria-pressed={soundPlaying} data-testid="button-toggle-sound">{soundPlaying ? <><Pause size={14} /> Pause track</> : <><Play size={14} /> Play track</>}</button>}
                     </>
@@ -1251,15 +1283,6 @@ export default function CurrentChunkPage({
                       <p className="room-sound-note">{backgroundPlaying ? 'The selected video is playing with its audio source available.' : 'The video is muted until you choose this source. Start it when you are ready.'}</p>
                       <button className="room-subtle-action" type="button" onClick={toggleBackground} aria-label="Background video audio" aria-pressed={backgroundPlaying} data-testid="button-toggle-video-audio">
                         {backgroundPlaying ? <><Pause size={14} /> Pause video</> : <><Play size={14} /> Play video with sound</>}
-                      </button>
-                    </div>
-                  )}
-
-                  {youtubeSoundSource && (
-                    <div className="room-sound-selected">
-                      <p className="room-sound-note">YouTube audio uses the player’s native volume controls. Playback begins only inside the player.</p>
-                      <button className="room-subtle-action" type="button" onClick={toggleBackground} data-testid="button-open-youtube-audio">
-                        {youtubeOpen ? 'Close YouTube player' : 'Open YouTube player'}
                       </button>
                     </div>
                   )}
@@ -1275,6 +1298,52 @@ export default function CurrentChunkPage({
                     </div>
                   )}
                   {soundSource === 'silence' && <p className="room-sound-note">Sound is off. The video remains muted and separate audio is paused.</p>}
+                  <section className="room-session-cues" aria-label="Focus session sound cues">
+                    <p className="room-panel-note">Session cues</p>
+                    <div className="room-motion-setting">
+                      <div>
+                        <strong>Focus starts</strong>
+                        <small>Play a gentle chime when a focus timer begins.</small>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-label="Play a chime when focus starts"
+                        aria-checked={initialSessionCues.start}
+                        disabled={!onSessionCuesChange}
+                        onClick={() => {
+                          const start = !initialSessionCues.start;
+                          if (start) primeSessionCueAudio();
+                          onSessionCuesChange?.({ ...initialSessionCues, start });
+                        }}
+                        data-testid="button-toggle-focus-start-chime"
+                      >
+                        <span>{initialSessionCues.start ? 'On' : 'Off'}</span>
+                      </button>
+                    </div>
+                    <div className="room-motion-setting">
+                      <div>
+                        <strong>Focus ends</strong>
+                        <small>Play a gentle chime when a focus timer finishes.</small>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-label="Play a chime when focus ends"
+                        aria-checked={initialSessionCues.end}
+                        disabled={!onSessionCuesChange}
+                        onClick={() => {
+                          const end = !initialSessionCues.end;
+                          if (end) primeSessionCueAudio();
+                          onSessionCuesChange?.({ ...initialSessionCues, end });
+                        }}
+                        data-testid="button-toggle-focus-end-chime"
+                      >
+                        <span>{initialSessionCues.end ? 'On' : 'Off'}</span>
+                      </button>
+                    </div>
+                    <p className="room-sound-note">Chimes are independent from background music mute and volume.</p>
+                  </section>
                 </div>
               )}
               {validation && <p className="room-validation" role="status">{validation}</p>}
@@ -1285,7 +1354,21 @@ export default function CurrentChunkPage({
             <button type="button" className={panel === 'tasks' ? 'active' : ''} aria-controls="focus-room-panel" aria-pressed={panel === 'tasks'} onClick={(event) => { panelTriggerRef.current = event.currentTarget; setPanel(panel === 'tasks' ? null : 'tasks'); }} data-testid="button-open-tasks"><ListTodo size={17} /><span>Tasks</span>{checklist.length > 0 && <small>{completedSteps}/{checklist.length}</small>}</button>
             <button type="button" className={panel === 'timer' ? 'active' : ''} aria-controls="focus-room-panel" aria-pressed={panel === 'timer'} onClick={(event) => { panelTriggerRef.current = event.currentTarget; setPanel(panel === 'timer' ? null : 'timer'); }} data-testid="button-open-timer"><Settings2 size={17} /><span>Timer settings</span></button>
             <button type="button" className={panel === 'background' ? 'active' : ''} aria-controls="focus-room-panel" aria-pressed={panel === 'background'} onClick={(event) => { panelTriggerRef.current = event.currentTarget; setPanel(panel === 'background' ? null : 'background'); }} data-testid="button-open-background"><Image size={17} /><span>Background</span></button>
-            <button type="button" className={panel === 'sound' ? 'active' : ''} aria-controls="focus-room-panel" aria-pressed={panel === 'sound'} onClick={(event) => { panelTriggerRef.current = event.currentTarget; setPanel(panel === 'sound' ? null : 'sound'); }} data-testid="button-open-sound">{soundSource === 'silence' || (muted && !youtubeSoundSource) ? <VolumeX size={17} /> : <Volume2 size={17} />}<span>Sound</span></button>
+            <button type="button" className={panel === 'sound' ? 'active' : ''} aria-controls="focus-room-panel" aria-pressed={panel === 'sound'} onClick={(event) => { panelTriggerRef.current = event.currentTarget; primeSessionCueAudio(); setPanel(panel === 'sound' ? null : 'sound'); }} data-testid="button-open-sound">{soundSource === 'silence' || muted ? <VolumeX size={17} /> : <Volume2 size={17} />}<span>Sound</span></button>
+            {hasRoomMuteControl && (
+              <button
+                type="button"
+                className={muted ? 'active' : ''}
+                onClick={changeMute}
+                aria-label={muted ? 'Unmute background sound' : 'Mute background sound'}
+                aria-pressed={muted}
+                title={muted ? 'Unmute background sound' : 'Mute background sound'}
+                data-testid="button-toggle-room-mute"
+              >
+                {muted ? <VolumeX size={17} /> : <Volume2 size={17} />}
+                <span>{muted ? 'Unmute' : 'Mute'}</span>
+              </button>
+            )}
             <button type="button" className={panel === 'history' ? 'active' : ''} aria-controls="focus-room-panel" aria-pressed={panel === 'history'} onClick={(event) => { panelTriggerRef.current = event.currentTarget; setPanel(panel === 'history' ? null : 'history'); }} data-testid="button-open-focus-history"><History size={17} /><span>History</span></button>
             <button type="button" onClick={() => { setPanel(null); setHidden(true); }} data-testid="button-hide-room"><X size={17} /><span>Hide</span></button>
           </nav>

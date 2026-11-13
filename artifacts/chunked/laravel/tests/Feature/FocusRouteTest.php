@@ -17,6 +17,15 @@ class FocusRouteTest extends TestCase
     {
         config(['focus-media.storage_disk' => 'object_storage']);
         $this->seed(FocusMediaAssetSeeder::class);
+        FocusMediaAsset::query()->create([
+            'title' => 'Legacy YouTube entry',
+            'category' => 'YouTube',
+            'kind' => 'youtube',
+            'source_type' => 'youtube',
+            'external_url' => 'https://www.youtube.com/watch?v=12345678901',
+            'is_active' => true,
+            'sort_order' => 0,
+        ]);
 
         $user = User::factory()->create();
         $user->settings()->create([
@@ -75,6 +84,13 @@ class FocusRouteTest extends TestCase
                   ->where('mediaCatalog.1.url', '/api/storage/public-objects/focus-media/teto-miku-halloween.mp4')
                 ->where('routes.focus', '/focus')
             );
+    }
+
+    public function test_youtube_link_submission_is_no_longer_available(): void
+    {
+        $this->post('/focus/media/youtube', [
+            'url' => 'https://www.youtube.com/watch?v=12345678901',
+        ])->assertNotFound();
     }
 
     public function test_media_urls_are_relative_for_local_and_hosted_storage(): void

@@ -92,6 +92,7 @@ class FocusController extends Controller
         ] : null;
         $mediaCatalog = FocusMediaAsset::query()
             ->where('is_active', true)
+            ->whereIn('kind', ['audio', 'video', 'image'])
             ->where(fn ($query) => $query->whereNull('user_id')->orWhere('user_id', $user->id))
             ->orderBy('sort_order')
             ->orderBy('id')

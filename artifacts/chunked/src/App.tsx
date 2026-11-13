@@ -168,34 +168,45 @@ function Link(props: ComponentProps<typeof InertiaLink>) {
   return <InertiaLink {...props} />;
 }
 
-function Wordmark() {
-  return <Link href="/" className="flex items-center gap-2.5 text-[hsl(var(--sidebar-foreground))] no-underline" aria-label="Chunked, Day">
+function Wordmark({ onDarkSurface = false }: { onDarkSurface?: boolean }) {
+  return <Link href="/" className={`flex items-center gap-2.5 no-underline ${onDarkSurface ? 'text-[hsl(var(--sidebar-foreground))]' : 'text-[hsl(var(--foreground))]'}`} aria-label="Chunked, Day">
     <span className="grid h-8 w-8 place-items-center rounded-[11px] bg-[#d9a38f] text-[#203a31]"><span className="h-3.5 w-3.5 rounded-[4px] border-[1.5px] border-current" /></span>
     <span className="text-[19px] font-semibold tracking-[-.055em]">chunked<span className="text-[#d9a38f]">.</span></span>
   </Link>;
 }
 
-function AppShell({ children, current = 'day', settings, user }: {
+function AppShell({ children, current = 'day', settings, user, focusChunk, focusDate, focusHref }: {
   children: ReactNode; current?: string; settings: UserSettings; user?: ChunkedPageProps['user'];
+  focusChunk?: Chunk; focusDate?: string; focusHref?: string;
 }) {
-  const { routes } = useChunkedPage();
+  const pageProps = useChunkedPage();
+  const { routes } = pageProps;
   const [mobileOpen, setMobileOpen] = useState(false);
   useEffect(() => {
     const systemDark = settings.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches;
     document.documentElement.classList.toggle('dark', settings.theme === 'dark' || systemDark);
   }, [settings.theme]);
-  const links = [
+  const navChunk = focusChunk ?? pageProps.chunk ?? pageProps.chunks?.find((chunk) => String(chunk.id) === String(pageProps.selectedChunkId));
+  const dateForFocus = focusDate ?? pageProps.today ?? pageProps.date ?? dateKey();
+  const baseFocusHref = routes?.focus || '/focus';
+  const navFocusHref = focusHref ?? (navChunk
+    ? `${baseFocusHref}?${new URLSearchParams({ date: dateForFocus, chunk: String(navChunk.id) }).toString()}`
+    : baseFocusHref);
+  const links: { href: string; label: string; detail?: string; icon: typeof Compass; active: boolean }[] = [
     { href: '/day', label: 'Day', icon: Compass, active: current === 'day' },
+    { href: navFocusHref, label: 'Focus', detail: navChunk?.name ?? 'Current chunk', icon: Play, active: current === 'focus' },
     { href: '/settings', label: 'Settings', icon: Settings2, active: current === 'settings' },
   ];
   const navLinks = <nav className="flex flex-col gap-1.5" aria-label="Main navigation">
-    {links.map(({ href, label, icon: Icon, active }) => <Link key={href} href={href} className={`group flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm no-underline transition-colors ${active ? 'bg-white/10 text-white' : 'text-white/65 hover:bg-white/[.06] hover:text-white'}`} aria-current={active ? 'page' : undefined} data-testid={`link-nav-${label.toLowerCase()}`}>
-      <Icon size={17} strokeWidth={1.7} /><span>{label}</span>{active && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[#dda993]" />}
+    {links.map(({ href, label, detail, icon: Icon, active }) => <Link key={label} href={href} className={`group flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm no-underline transition-colors ${active ? 'bg-white/10 text-white' : 'text-white/65 hover:bg-white/[.06] hover:text-white'}`} aria-current={active ? 'page' : undefined} aria-label={detail ? `${label}, ${detail}` : label} data-testid={`link-nav-${label.toLowerCase()}`}>
+      <Icon size={17} strokeWidth={1.7} />
+      <span className="min-w-0 flex-1"><span className="block truncate">{label}</span>{detail && <span className={`mt-0.5 block truncate text-[10px] leading-4 ${active ? 'text-white/70' : 'text-white/45'}`}>{detail}</span>}</span>
+      {active && <span className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-[#dda993]" />}
     </Link>)}
   </nav>;
   return <div className="app-shell grain flex">
     {settings.navigationPosition !== 'top' && <aside className="sidebar hidden min-h-[100dvh] flex-col px-5 pb-5 pt-7 md:flex">
-      <Wordmark />
+      <Wordmark onDarkSurface />
       <div className="mt-14 px-3 text-[10px] font-bold uppercase tracking-[.19em] text-white/35">Your space</div>
       <div className="mt-3">{navLinks}</div>
       <div className="mt-auto rounded-[18px] border border-white/10 bg-white/[.045] p-4">
@@ -210,13 +221,15 @@ function AppShell({ children, current = 'day', settings, user }: {
       {routes?.logout && <button onClick={() => router.post(routes.logout!)} className="mt-3 self-start rounded-lg px-2 py-1 text-[10px] text-white/50 hover:bg-white/10 hover:text-white">Sign out</button>}
     </aside>}
     <div className="min-w-0 flex-1">
-      {settings.navigationPosition === 'top' && <header className="hidden h-[72px] items-center justify-between border-b border-soft px-8 md:flex"><Wordmark /><nav className="flex items-center gap-2" aria-label="Main navigation">{links.map(({ href, label, icon: Icon, active }) => <Link key={href} href={href} className={`flex items-center gap-2 rounded-full px-4 py-2 text-xs no-underline ${active ? 'bg-[hsl(var(--muted))] font-semibold text-[hsl(var(--primary))]' : 'text-muted hover:bg-[hsl(var(--muted))]'}`} aria-current={active ? 'page' : undefined}><Icon size={15} />{label}</Link>)}</nav><div className="flex items-center gap-2 text-xs text-muted"><span className="grid h-8 w-8 place-items-center rounded-full bg-[#e5c8b7] font-semibold text-[#294238]">{user?.name?.slice(0, 1).toUpperCase() || 'Y'}</span>{user?.name || 'Your day'}</div></header>}
+      {settings.navigationPosition === 'top' && <header className="hidden h-[72px] items-center justify-between gap-4 border-b border-soft px-6 md:flex lg:px-8"><Wordmark /><nav className="flex items-center gap-1.5" aria-label="Main navigation">{links.map(({ href, label, detail, icon: Icon, active }) => <Link key={label} href={href} className={`flex items-center gap-2 rounded-full px-3 py-2 text-xs no-underline transition-colors ${active ? 'bg-[hsl(var(--muted))] font-semibold text-[hsl(var(--primary))]' : 'text-muted hover:bg-[hsl(var(--muted))]'}`} aria-current={active ? 'page' : undefined} aria-label={detail ? `${label}, ${detail}` : label} data-testid={`link-nav-${label.toLowerCase()}`}>
+        <Icon size={15} /><span className="flex min-w-0 flex-col items-start leading-tight"><span>{label}</span>{detail && <span className="max-w-[88px] truncate text-[9px] font-normal text-muted">{detail}</span>}</span>
+      </Link>)}</nav><div className="flex shrink-0 items-center gap-2 text-xs text-muted"><span className="grid h-8 w-8 place-items-center rounded-full bg-[#e5c8b7] font-semibold text-[#294238]">{user?.name?.slice(0, 1).toUpperCase() || 'Y'}</span>{user?.name || 'Your day'}</div></header>}
       <header className="flex h-[68px] items-center justify-between border-b border-soft px-5 md:hidden">
         <button onClick={() => setMobileOpen((open) => !open)} className="rounded-xl p-2" aria-label="Open navigation" data-testid="button-open-menu"><Menu size={19} /></button>
         <Wordmark />
-        <Link href="/settings" className="rounded-xl p-2 text-muted" aria-label="Settings"><Settings2 size={18} /></Link>
+        <div className="flex items-center gap-1"><Link href={navFocusHref} className="rounded-xl p-2 text-muted hover:bg-[hsl(var(--muted))]" aria-label={navChunk ? `Focus ${navChunk.name}` : 'Open current chunk'} data-testid="link-nav-focus-mobile"><Play size={17} /></Link><Link href="/settings" className="rounded-xl p-2 text-muted" aria-label="Settings"><Settings2 size={18} /></Link></div>
       </header>
-      {mobileOpen && <div className="fixed inset-0 z-40 bg-[hsl(var(--sidebar))] p-6 md:hidden"><div className="flex justify-between"><Wordmark /><button onClick={() => setMobileOpen(false)} className="text-white" aria-label="Close navigation"><X /></button></div><div className="mt-12">{navLinks}</div><p className="mt-10 max-w-xs text-sm leading-6 text-white/60">Your day is a guide, not a scorecard. Plans can change.</p></div>}
+      {mobileOpen && <div className="fixed inset-0 z-40 bg-[hsl(var(--sidebar))] p-6 md:hidden"><div className="flex justify-between"><Wordmark onDarkSurface /><button onClick={() => setMobileOpen(false)} className="text-white" aria-label="Close navigation"><X /></button></div><div className="mt-12">{navLinks}</div><p className="mt-10 max-w-xs text-sm leading-6 text-white/60">Your day is a guide, not a scorecard. Plans can change.</p></div>}
       <main className="main-canvas min-h-[calc(100dvh-68px)]">{children}</main>
     </div>
   </div>;
@@ -343,7 +356,7 @@ function DayPage() {
     setMenuTask(null); setReviewTask(null); notify(plannedDate !== today ? 'Moved to another day.' : 'Moved to another part of your day.');
   };
   const settingsForShell = settings;
-  return <AppShell current="day" settings={settingsForShell} user={props.user}>
+  return <AppShell current="day" settings={settingsForShell} user={props.user} focusChunk={focusChunk} focusDate={today}>
     <div className="mx-auto max-w-[1070px] px-5 pb-20 pt-9 sm:px-8 sm:pt-12">
       <div className="fade-up flex flex-wrap items-center justify-between gap-3">
         <div className="mono flex items-center gap-2 text-[10px] uppercase tracking-[.15em] text-muted"><span className="h-1.5 w-1.5 rounded-full bg-[#cb8d72]" /> Your day, in little pieces</div>
@@ -539,17 +552,17 @@ function SettingsPage() {
         <section className="surface rounded-[22px] p-5 sm:p-7">
           <h2 className="m-0 text-sm font-semibold">Appearance</h2><p className="mb-4 mt-1.5 text-xs text-muted">A softer palette for the pace you like.</p>
           <div className="grid gap-3 sm:grid-cols-3">
-            {([{ theme: 'light', title: 'Daylight', icon: Sun, description: 'Warm paper, green ink' }, { theme: 'dark', title: 'Evening', icon: Moon, description: 'Deep forest, soft linen' }, { theme: 'system', title: 'Follow device', icon: Compass, description: 'Let your device decide' }] as const).map(({ theme, title, icon: Icon, description }) => <button key={theme} onClick={() => saveSettings({ theme })} aria-pressed={form.data.theme === theme} className={`rounded-2xl border p-4 text-left transition-colors ${form.data.theme === theme ? 'border-[#78907b] bg-[#edf1e9]' : 'border-soft hover:bg-[hsl(var(--muted))]'}`}><Icon size={17} className="text-[hsl(var(--primary))]" /><div className="mt-3 text-xs font-semibold">{title}</div><div className="mt-1 text-[10px] text-muted">{description}</div></button>)}
+            {([{ theme: 'light', title: 'Daylight', icon: Sun, description: 'Warm paper, green ink' }, { theme: 'dark', title: 'Evening', icon: Moon, description: 'Deep forest, soft linen' }, { theme: 'system', title: 'Follow device', icon: Compass, description: 'Let your device decide' }] as const).map(({ theme, title, icon: Icon, description }) => <button key={theme} onClick={() => saveSettings({ theme })} aria-pressed={form.data.theme === theme} className={`theme-glow rounded-2xl border p-4 text-left text-[hsl(var(--foreground))] transition-colors ${form.data.theme === theme ? 'border-[#78907b] bg-[#edf1e9] dark:border-[#91b18f] dark:bg-[#293b30]' : 'border-soft hover:bg-[hsl(var(--muted))]'}`}><Icon size={17} className="text-[hsl(var(--primary))]" /><div className="mt-3 text-xs font-semibold">{title}</div><div className="mt-1 text-[10px] text-muted">{description}</div></button>)}
           </div>
         </section>
         <section className="surface rounded-[22px] p-5 sm:p-7">
-          <h2 className="m-0 text-sm font-semibold">Where navigation lives</h2><p className="mb-4 mt-1.5 text-xs text-muted">Pick the layout that feels natural. Both examples use the same two links.</p>
+          <h2 className="m-0 text-sm font-semibold">Where navigation lives</h2><p className="mb-4 mt-1.5 text-xs text-muted">Pick the layout that feels natural. Day, Focus, and Settings stay easy to reach.</p>
           <div className="grid gap-3 sm:grid-cols-2">
-            <button onClick={() => saveSettings({ navigationPosition: 'sidebar' })} aria-pressed={form.data.navigationPosition === 'sidebar'} className={`rounded-2xl border p-4 text-left ${form.data.navigationPosition === 'sidebar' ? 'border-[#78907b] bg-[#edf1e9]' : 'border-soft hover:bg-[hsl(var(--muted))]'}`}>
+            <button onClick={() => saveSettings({ navigationPosition: 'sidebar' })} aria-pressed={form.data.navigationPosition === 'sidebar'} className={`theme-glow rounded-2xl border p-4 text-left text-[hsl(var(--foreground))] ${form.data.navigationPosition === 'sidebar' ? 'border-[#78907b] bg-[#edf1e9] dark:border-[#91b18f] dark:bg-[#293b30]' : 'border-soft hover:bg-[hsl(var(--muted))]'}`}>
               <div className="mb-3 flex h-[82px] overflow-hidden rounded-xl border border-soft bg-[hsl(var(--background))]"><div className="flex w-[29%] flex-col gap-2 bg-[#29463a] p-2"><span className="h-2 w-9 rounded bg-white/60" /><span className="mt-2 h-2 w-12 rounded bg-white/30" /><span className="h-2 w-10 rounded bg-white/20" /></div><div className="flex-1 p-3"><span className="block h-2 w-16 rounded bg-[#6e8972]/35" /><span className="mt-3 block h-8 rounded-lg bg-[#e6e9de]" /></div></div>
               <div className="flex items-center justify-between"><span className="text-xs font-semibold">Sidebar</span>{form.data.navigationPosition === 'sidebar' && <CheckCircle2 size={15} className="text-[hsl(var(--primary))]" />}</div><div className="mt-1 text-[10px] text-muted">Links stay tucked along the left.</div>
             </button>
-            <button onClick={() => saveSettings({ navigationPosition: 'top' })} aria-pressed={form.data.navigationPosition === 'top'} className={`rounded-2xl border p-4 text-left ${form.data.navigationPosition === 'top' ? 'border-[#78907b] bg-[#edf1e9]' : 'border-soft hover:bg-[hsl(var(--muted))]'}`}>
+            <button onClick={() => saveSettings({ navigationPosition: 'top' })} aria-pressed={form.data.navigationPosition === 'top'} className={`theme-glow rounded-2xl border p-4 text-left text-[hsl(var(--foreground))] ${form.data.navigationPosition === 'top' ? 'border-[#78907b] bg-[#edf1e9] dark:border-[#91b18f] dark:bg-[#293b30]' : 'border-soft hover:bg-[hsl(var(--muted))]'}`}>
               <div className="mb-3 overflow-hidden rounded-xl border border-soft bg-[hsl(var(--background))]"><div className="flex h-6 items-center gap-2 border-b border-soft bg-[hsl(var(--card))] px-2"><span className="h-1.5 w-6 rounded bg-[#6e8972]/50" /><span className="h-1.5 w-5 rounded bg-[#6e8972]/20" /><span className="h-1.5 w-6 rounded bg-[#6e8972]/20" /></div><div className="p-3"><span className="block h-2 w-16 rounded bg-[#6e8972]/35" /><span className="mt-3 block h-8 rounded-lg bg-[#e6e9de]" /></div></div>
               <div className="flex items-center justify-between"><span className="text-xs font-semibold">Top bar</span>{form.data.navigationPosition === 'top' && <CheckCircle2 size={15} className="text-[hsl(var(--primary))]" />}</div><div className="mt-1 text-[10px] text-muted">Links sit in a slim row above your day.</div>
             </button>
@@ -785,7 +798,7 @@ function AuthPage({ mode }: { mode: 'login' | 'register' }) {
   };
   return <div className="main-canvas grain grid min-h-[100dvh] lg:grid-cols-[1fr_1fr]">
     <section className="relative hidden min-h-[100dvh] overflow-hidden bg-[#29453a] p-10 text-[#f4f0e5] lg:flex lg:flex-col">
-      <Wordmark />
+      <Wordmark onDarkSurface />
       <div className="absolute -right-20 top-28 h-[440px] w-[440px] rounded-full border border-white/10" /><div className="absolute right-[-22px] top-[180px] h-[270px] w-[270px] rounded-full border border-white/10" />
       <div className="relative z-10 my-auto max-w-[500px] pb-12 pl-8"><div className="mono mb-5 text-[10px] uppercase tracking-[.17em] text-[#c1cbb9]">A little structure. A lot of grace.</div><h1 className="serif m-0 text-[68px] font-normal leading-[.91] tracking-[-.025em]">You don’t have<br />to do it <span className="italic text-[#d9a38f]">all.</span></h1><p className="mt-6 max-w-sm text-sm leading-7 text-white/65">A calmer place to hold your many interests, one small part of the day at a time.</p></div>
       <div className="relative z-10 flex items-center gap-3 text-[11px] text-white/55"><span className="h-px w-8 bg-[#d9a38f]" />Plans can change. You can, too.</div>

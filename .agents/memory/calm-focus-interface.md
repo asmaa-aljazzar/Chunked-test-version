@@ -1,0 +1,10 @@
+---
+name: Calm focus interface
+description: Product design constraints for Chunked's focus and day-planning screens.
+---
+
+Chunked should help users focus without adding pressure or extra decisions. Use clear flows with sensible defaults; keep the current chunk easy to reach from either navigation layout. Use readable contrast in light and dark themes, and let hover/focus feedback draw from the active theme's accent color. Keep movement subtle and purposeful, offer reduced-motion support, and never autoplay ambient sound or visuals.
+
+**Why:** The product is meant to feel comfortable and uncluttered for people managing many interests without feeling exhausted or punished.
+
+**How to apply:** When changing the Day, Focus, or navigation UI, prefer one obvious next action, calm theme-matched feedback, and optional ambience that never blocks task or timer use.

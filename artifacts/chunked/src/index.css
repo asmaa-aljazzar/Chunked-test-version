@@ -93,6 +93,16 @@
 
 * { box-sizing: border-box; }
 html { min-width: 320px; background: hsl(var(--background)); }
+html { scrollbar-color: hsl(var(--primary) / .34) transparent; scrollbar-width: thin; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: hsl(var(--primary) / .3);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: hsl(var(--primary) / .55); background-clip: padding-box; }
 body {
   margin: 0;
   min-height: 100vh;
@@ -111,6 +121,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .mono { font-family: var(--app-font-mono); }
 .app-shell { min-height: 100dvh; }
 .sidebar {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  height: 100dvh;
+  overflow-y: auto;
   background: hsl(var(--sidebar));
   color: hsl(var(--sidebar-foreground));
   width: 248px;
@@ -122,6 +137,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
     hsl(var(--background));
 }
 .surface { background: hsl(var(--card)); box-shadow: var(--shadow-card); }
+.theme-glow { transition: box-shadow .22s ease, border-color .22s ease, transform .22s ease; }
+.theme-glow:focus-visible { box-shadow: 0 0 0 1px hsl(var(--primary) / .2), 0 0 22px hsl(var(--primary) / .18); }
+@media (hover: hover) {
+  .theme-glow:hover { border-color: hsl(var(--primary) / .42); box-shadow: 0 0 0 1px hsl(var(--primary) / .15), 0 0 24px hsl(var(--primary) / .16); }
+}
 .text-muted { color: hsl(var(--muted-foreground)); }
 .border-soft { border-color: hsl(var(--border)); }
 .hover-lift { transition: transform .22s ease, background-color .22s ease, border-color .22s ease; }

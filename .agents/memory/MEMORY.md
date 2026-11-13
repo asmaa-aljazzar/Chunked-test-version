@@ -1,2 +1,3 @@
 - [Task history across day changes](task-history-across-day-changes.md) — preserve old task placement meaning when recurring chunks change.
 - [Laravel server environment](laravel-serve-environment.md) — pass workflow-injected MySQL and HTTPS settings into Artisan's PHP server child.
+- [Calm focus interface](calm-focus-interface.md) — keep Chunked's screens low-decision, theme-aware, and gently animated.

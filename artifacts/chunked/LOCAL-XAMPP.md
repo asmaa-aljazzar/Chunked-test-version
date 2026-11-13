@@ -61,6 +61,18 @@ php artisan serve
 
 Open `http://127.0.0.1:8000`, create an account, and choose or skip the day-rhythm setup. Migrations create the tables; no database import is needed.
 
+## Optional focus media
+
+The room's still Chunked-theme background works without uploaded files. On XAMPP, seeded media uses Laravel's local `public` disk unless `FOCUS_MEDIA_DISK` is explicitly set. To use the supplied MP3 or MP4 locally, place it in `artifacts/chunked/laravel/storage/app/public/focus-media` with the seeded filename, then run:
+
+```powershell
+cd artifacts/chunked/laravel
+php artisan db:seed --class="Database\Seeders\FocusMediaAssetSeeder"
+php artisan storage:link
+```
+
+Those media files are ignored by Git, so copy them separately when moving the project to another computer. Replit-hosted builds use App Storage when its bucket is configured; the XAMPP demo does not depend on the Replit storage service.
+
 ## Scope and data
 
 The current milestone includes registration/login, day-rhythm setup, chunks, dated tasks, completion, editing, moving, deleting, and basic appearance/navigation preferences. Unfinished-task choices are manual: move to another chunk/date, mark done, leave for later, or delete. No AI action runs in this version. Arabic currently changes page direction only; the text is still English.

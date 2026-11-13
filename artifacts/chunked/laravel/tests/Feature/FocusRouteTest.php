@@ -7,6 +7,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 use Database\Seeders\FocusMediaAssetSeeder;
+use App\Models\FocusMediaAsset;
 
 class FocusRouteTest extends TestCase
 {
@@ -14,6 +15,7 @@ class FocusRouteTest extends TestCase
 
     public function test_focus_route_opens_the_selected_chunk_and_only_its_tasks(): void
     {
+        config(['focus-media.storage_disk' => 'object_storage']);
         $this->seed(FocusMediaAssetSeeder::class);
 
         $user = User::factory()->create();
@@ -68,11 +70,38 @@ class FocusRouteTest extends TestCase
                 ->where('tasks.0.title', 'Read one chapter')
                  ->has('mediaCatalog', 2)
                  ->where('mediaCatalog.0.kind', 'audio')
-                 ->where('mediaCatalog.0.url', url('/api/storage/public-objects/focus-media/magical-moments.mp3'))
+                 ->where('mediaCatalog.0.url', '/api/storage/public-objects/focus-media/magical-moments.mp3')
                  ->where('mediaCatalog.1.kind', 'video')
-                 ->where('mediaCatalog.1.url', url('/api/storage/public-objects/focus-media/teto-miku-halloween.mp4'))
+                  ->where('mediaCatalog.1.url', '/api/storage/public-objects/focus-media/teto-miku-halloween.mp4')
                 ->where('routes.focus', '/focus')
             );
+    }
+
+    public function test_media_urls_are_relative_for_local_and_hosted_storage(): void
+    {
+        config(['app.url' => 'http://localhost']);
+
+        $local = new FocusMediaAsset([
+            'storage_disk' => 'public',
+            'file_path' => 'focus-media/room.mp4',
+        ]);
+        $hosted = new FocusMediaAsset([
+            'storage_disk' => 'object_storage',
+            'file_path' => 'focus-media/room.mp4',
+        ]);
+
+        $this->assertSame('/storage/focus-media/room.mp4', $local->public_url);
+        $this->assertSame('/api/storage/public-objects/focus-media/room.mp4', $hosted->public_url);
+    }
+
+    public function test_media_urls_reject_path_traversal(): void
+    {
+        $asset = new FocusMediaAsset([
+            'storage_disk' => 'public',
+            'file_path' => 'focus-media/../private.mp4',
+        ]);
+
+        $this->assertNull($asset->public_url);
     }
 
     public function test_focus_route_requires_authentication(): void

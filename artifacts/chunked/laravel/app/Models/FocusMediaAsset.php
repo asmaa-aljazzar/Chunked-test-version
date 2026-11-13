@@ -41,14 +41,7 @@ class FocusMediaAsset extends Model
             return null;
         }
 
-        if ($this->storage_disk === 'object_storage') {
-            return url('/api/storage/public-objects/'.implode(
-                '/',
-                array_map('rawurlencode', explode('/', ltrim($this->file_path, '/'))),
-            ));
-        }
-
-        return Storage::disk($this->storage_disk ?: 'public')->url($this->file_path);
+        return $this->mediaUrlForPath($this->file_path);
     }
 
     public function getPublicThumbnailUrlAttribute(): ?string
@@ -57,13 +50,36 @@ class FocusMediaAsset extends Model
             return null;
         }
 
-        if ($this->storage_disk === 'object_storage') {
-            return url('/api/storage/public-objects/'.implode(
-                '/',
-                array_map('rawurlencode', explode('/', ltrim($this->thumbnail_path, '/'))),
-            ));
+        return $this->mediaUrlForPath($this->thumbnail_path);
+    }
+
+    private function mediaUrlForPath(string $path): ?string
+    {
+        $segments = explode('/', ltrim($path, '/'));
+        foreach ($segments as $segment) {
+            $decoded = rawurldecode($segment);
+            if (
+                $segment === ''
+                || $decoded === '.'
+                || $decoded === '..'
+                || str_contains($decoded, '/')
+                || str_contains($decoded, '\\')
+            ) {
+                return null;
+            }
         }
 
-        return Storage::disk($this->storage_disk ?: 'public')->url($this->thumbnail_path);
+        $encodedPath = implode('/', array_map('rawurlencode', $segments));
+        $disk = $this->storage_disk ?: 'public';
+
+        if ($disk === 'object_storage') {
+            return '/api/storage/public-objects/'.$encodedPath;
+        }
+
+        if ($disk === 'public') {
+            return '/storage/'.$encodedPath;
+        }
+
+        return Storage::disk($disk)->url($path);
     }
 }

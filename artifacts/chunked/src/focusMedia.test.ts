@@ -28,3 +28,13 @@ test('accepts safe local Laravel focus media paths but rejects traversal', () =>
   assert.equal(validateDirectVisualUrl('/storage/focus-media/../private.mp4'), null);
   assert.equal(validateDirectAudioUrl('/storage/private/room.mp3'), null);
 });
+
+test('accepts safe hosted object-storage paths and rejects encoded traversal', () => {
+  const video = '/api/storage/public-objects/focus-media/room.mp4';
+  const audio = '/api/storage/public-objects/focus-media/room.mp3';
+
+  assert.equal(validateDirectVisualUrl(video), video);
+  assert.equal(validateDirectAudioUrl(audio), audio);
+  assert.equal(isVideoUrl(video), true);
+  assert.equal(validateDirectVisualUrl('/api/storage/public-objects/focus-media/%2e%2e/private.mp4'), null);
+});

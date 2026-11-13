@@ -197,6 +197,36 @@ class OnboardingTaskHandlingTest extends TestCase
         }
     }
 
+    public function test_legacy_bulk_actions_cannot_bypass_task_confirmation(): void
+    {
+        foreach (['move_by_time', 'delete'] as $legacyAction) {
+            $user = User::factory()->create();
+            $this->actingAs($user);
+            $oldChunks = $this->saveRhythm([
+                ['name' => 'Morning', 'startTime' => '08:00', 'endTime' => '12:00'],
+            ]);
+            $task = $this->createTask($user, $oldChunks->first(), 'Read');
+
+            $this->post(route('onboarding.store'), [
+                ...$this->rhythmPayload([
+                    ['name' => 'Early', 'startTime' => '08:00', 'endTime' => '10:00'],
+                    ['name' => 'Later', 'startTime' => '10:00', 'endTime' => '12:00'],
+                ]),
+                'taskAction' => $legacyAction,
+            ])->assertSessionHasErrors('taskDecisions');
+
+            $this->assertDatabaseHas('chunks', [
+                'id' => $oldChunks->first()->id,
+                'deleted_at' => null,
+            ]);
+            $this->assertDatabaseHas('tasks', [
+                'id' => $task->id,
+                'chunk_id' => $oldChunks->first()->id,
+                'deleted_at' => null,
+            ]);
+        }
+    }
+
     private function saveRhythm(array $chunks)
     {
         $this->post(route('onboarding.store'), $this->rhythmPayload($chunks))

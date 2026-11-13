@@ -1,11 +1,31 @@
+const LOCAL_MEDIA_PREFIXES = [
+  '/storage/focus-media/',
+  '/api/storage/public-objects/focus-media/',
+];
+
+function isSafeLocalMediaPath(value: string): boolean {
+  const path = value.split(/[?#]/, 1)[0];
+  if (!LOCAL_MEDIA_PREFIXES.some((prefix) => path.startsWith(prefix)) || path.includes('\\')) {
+    return false;
+  }
+
+  return path.split('/').slice(1).every((segment) => {
+    if (!segment) return false;
+    try {
+      const decoded = decodeURIComponent(segment);
+      return decoded !== '.' && decoded !== '..' && !decoded.includes('/') && !decoded.includes('\\');
+    } catch {
+      return false;
+    }
+  });
+}
+
 function directHttpsAsset(value: string, extensions: string): string | null {
   const trimmed = value.trim();
+  const path = trimmed.split(/[?#]/, 1)[0];
   if (
-    trimmed.startsWith('/storage/focus-media/')
-    && !trimmed.startsWith('//')
-    && !trimmed.includes('\\')
-    && !trimmed.split(/[?#]/, 1)[0].split('/').includes('..')
-    && new RegExp(`\\.(?:${extensions})$`, 'i').test(trimmed.split(/[?#]/, 1)[0])
+    isSafeLocalMediaPath(trimmed)
+    && new RegExp(`\\.(?:${extensions})$`, 'i').test(path)
   ) {
     return trimmed;
   }
@@ -29,11 +49,12 @@ export function validateDirectAudioUrl(value: string): string | null {
 }
 
 export function isVideoUrl(value: string): boolean {
-  if (value.trim().startsWith('/storage/focus-media/')) {
-    return /\.(mp4|webm|mov)(?:[?#].*)?$/i.test(value.trim());
+  const trimmed = value.trim();
+  if (isSafeLocalMediaPath(trimmed)) {
+    return /\.(mp4|webm|mov)$/i.test(trimmed.split(/[?#]/, 1)[0]);
   }
   try {
-    return /\.(mp4|webm|mov)$/i.test(new URL(value).pathname);
+    return /\.(mp4|webm|mov)$/i.test(new URL(trimmed).pathname);
   } catch {
     return false;
   }

@@ -725,6 +725,7 @@ function FocusRoutePage() {
     }}
     onSelectBackground={(entry) => updateMediaPreferences({ backgroundId: entry?.id ?? null })}
     onSelectSound={(entry) => updateMediaPreferences({ soundId: entry?.id ?? null })}
+    onMediaChanged={() => router.reload({ only: ['mediaCatalog'] })}
     onSoundSourceChange={(soundSource) => updateMediaPreferences({ soundSource })}
     onSessionCuesChange={(sessionCues) => updateMediaPreferences({ sessionCues })}
     onReduceMotionChange={(reduceMotion) => updateMediaPreferences({ reduceMotion })}

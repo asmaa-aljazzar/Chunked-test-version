@@ -106,6 +106,7 @@ class FocusController extends Controller
                 'kind' => $asset->kind,
                 'url' => $asset->public_url,
                 'thumbnailUrl' => $asset->public_thumbnail_url,
+                'owned' => $asset->source_type === 'user_upload' && (int) $asset->user_id === (int) $user->id,
             ])
             ->filter(fn (array $asset) => is_string($asset['url']) && $asset['url'] !== '')
             ->values();

@@ -41,6 +41,7 @@ export type FocusMediaEntry = {
   url: string;
   kind: 'audio' | 'video' | 'image';
   thumbnailUrl?: string;
+  owned?: boolean;
 };
 
 export type FocusSoundSource = 'video' | 'library' | 'silence';
@@ -131,6 +132,7 @@ export type CurrentChunkPageProps = {
   onPlanSettingsChange?: (session: FocusSessionState) => void | Promise<void>;
   onSelectBackground?: (entry: FocusMediaEntry | null) => void;
   onSelectSound?: (entry: FocusMediaEntry | null) => void;
+  onMediaChanged?: () => void;
   onSoundSourceChange?: (source: FocusSoundSource) => void;
   onSessionCuesChange?: (settings: FocusSessionCueSettings) => void;
   onVolumeChange?: (volume: number) => void;
@@ -274,6 +276,7 @@ export default function CurrentChunkPage({
   onToggleChecklistItem, onAddChecklistItem,
   onUpdateChecklistItem, onDeleteChecklistItem, onMoveTask, onDeleteParentTask, onSwitchToChunk, onSessionChange,
   onSelectBackground, onSelectSound, onSoundSourceChange, onSessionCuesChange, onVolumeChange, onMuteChange, onReduceMotionChange,
+  onMediaChanged,
 }: CurrentChunkPageProps) {
   const [session, setSession] = useState<FocusSessionState>(() => ({ ...INITIAL_SESSION, ...sessionProps }));
   const [remaining, setRemaining] = useState(() => Math.max(0, session.targetSeconds - session.progressSeconds));
@@ -329,6 +332,12 @@ export default function CurrentChunkPage({
   const [soundPlaying, setSoundPlaying] = useState(false);
   const [backgroundPlaying, setBackgroundPlaying] = useState(false);
   const [validation, setValidation] = useState('');
+  const [mediaFile, setMediaFile] = useState<File | null>(null);
+  const [mediaTitle, setMediaTitle] = useState('');
+  const [editingMediaId, setEditingMediaId] = useState<string | null>(null);
+  const [editingMediaTitle, setEditingMediaTitle] = useState('');
+  const [mediaBusy, setMediaBusy] = useState(false);
+  const [mediaMessage, setMediaMessage] = useState('');
   const [switchingChunks, setSwitchingChunks] = useState(false);
   const backgroundVideoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -1041,6 +1050,189 @@ export default function CurrentChunkPage({
   const unresolvedTasks = unfinishedTasks.filter((task) => !resolvedTaskIds.has(String(task.id)));
   const canSwitchToNext = Boolean(nextChunk && onSwitchToChunk && unresolvedTasks.length === 0);
   const usableMedia = mediaCatalog.filter((entry) => entry.kind === 'audio' || entry.kind === 'video' || entry.kind === 'image');
+  const uploadMedia = async (kind: 'audio' | 'video') => {
+    if (!mediaFile || mediaBusy) return;
+    const acceptedTypes = new Set([
+      'audio/mpeg', 'audio/mp4', 'audio/aac', 'audio/wav', 'audio/x-wav', 'audio/ogg', 'audio/webm',
+      'video/mp4', 'video/webm', 'video/quicktime',
+    ]);
+    if (!acceptedTypes.has(mediaFile.type) || !mediaFile.type.startsWith(`${kind}/`)) {
+      setMediaMessage(`Choose a supported ${kind} file.`);
+      return;
+    }
+    if (mediaFile.size > 100 * 1024 * 1024) {
+      setMediaMessage('Files must be 100 MB or smaller.');
+      return;
+    }
+    const csrfToken = document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content;
+    if (!csrfToken) {
+      setMediaMessage('The upload could not be authorized. Refresh the page and try again.');
+      return;
+    }
+
+    setMediaBusy(true);
+    setMediaMessage('');
+    try {
+      const tokenResponse = await fetch('/focus/media/upload-token', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken, Accept: 'application/json' },
+        body: JSON.stringify({ title: mediaTitle.trim() || mediaFile.name.replace(/\.[^.]+$/, ''), mime_type: mediaFile.type, size: mediaFile.size }),
+      });
+      const tokenData = await tokenResponse.json() as { token?: string; message?: string };
+      if (!tokenResponse.ok || !tokenData.token) throw new Error(tokenData.message || 'Could not prepare this upload.');
+
+      const urlResponse = await fetch('/api/storage/focus-media/upload-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: tokenData.token }),
+      });
+      const urlData = await urlResponse.json() as { uploadURL?: string; error?: string };
+      if (!urlResponse.ok || !urlData.uploadURL) throw new Error(urlData.error || 'Could not connect to media storage.');
+
+      const uploadResponse = await fetch(urlData.uploadURL, {
+        method: 'PUT',
+        headers: { 'Content-Type': mediaFile.type },
+        body: mediaFile,
+      });
+      if (!uploadResponse.ok) throw new Error('The file could not be uploaded. Try again.');
+
+      const confirmResponse = await fetch('/api/storage/focus-media/confirm-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: tokenData.token }),
+      });
+      const confirmData = await confirmResponse.json() as { confirmation?: string; error?: string };
+      if (!confirmResponse.ok || !confirmData.confirmation) {
+        throw new Error(confirmData.error || 'The uploaded file did not match its type or size. Try another file.');
+      }
+
+      const saveResponse = await fetch('/focus/media', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken, Accept: 'application/json' },
+        body: JSON.stringify({ token: tokenData.token, confirmation: confirmData.confirmation }),
+      });
+      const saveData = await saveResponse.json() as { message?: string };
+      if (!saveResponse.ok) throw new Error(saveData.message || 'The upload finished but could not be added to your library.');
+
+      setMediaFile(null);
+      setMediaTitle('');
+      setMediaMessage('Added to your library.');
+      onMediaChanged?.();
+    } catch (error) {
+      setMediaMessage(error instanceof Error ? error.message : 'This media could not be saved.');
+    } finally {
+      setMediaBusy(false);
+    }
+  };
+  const removeOwnMedia = async (entry: FocusMediaEntry) => {
+    if (!entry.owned || mediaBusy) return;
+    const csrfToken = document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content;
+    if (!csrfToken) {
+      setMediaMessage('This item could not be removed. Refresh the page and try again.');
+      return;
+    }
+
+    setMediaBusy(true);
+    setMediaMessage('');
+    try {
+      const tokenResponse = await fetch(`/focus/media/${encodeURIComponent(entry.id)}/delete-token`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'X-CSRF-TOKEN': csrfToken, Accept: 'application/json' },
+      });
+      const tokenData = await tokenResponse.json() as { token?: string; message?: string };
+      if (!tokenResponse.ok || !tokenData.token) throw new Error(tokenData.message || 'This item could not be removed.');
+
+      const objectPath = new URL(entry.url, window.location.origin).pathname.replace(/^\/api\/storage\/focus-media\//, '');
+      const storageResponse = await fetch(`/api/storage/focus-media/${objectPath}?token=${encodeURIComponent(tokenData.token)}`, {
+        method: 'DELETE',
+      });
+      if (!storageResponse.ok) throw new Error('The file could not be removed from storage. Try again.');
+
+      const deleteResponse = await fetch(`/focus/media/${encodeURIComponent(entry.id)}`, {
+        method: 'DELETE',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken, Accept: 'application/json' },
+        body: JSON.stringify({ token: tokenData.token }),
+      });
+      const deleteData = await deleteResponse.json() as { message?: string };
+      if (!deleteResponse.ok) throw new Error(deleteData.message || 'The file was removed, but its library entry could not be updated.');
+
+      setMediaMessage('Removed from your library.');
+      onMediaChanged?.();
+    } catch (error) {
+      setMediaMessage(error instanceof Error ? error.message : 'This item could not be removed.');
+    } finally {
+      setMediaBusy(false);
+    }
+  };
+  const renameOwnMedia = async (event: FormEvent<HTMLFormElement>, entry: FocusMediaEntry) => {
+    event.preventDefault();
+    if (!entry.owned || mediaBusy || !editingMediaTitle.trim()) return;
+    const csrfToken = document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content;
+    if (!csrfToken) {
+      setMediaMessage('This name could not be saved. Refresh the page and try again.');
+      return;
+    }
+
+    setMediaBusy(true);
+    setMediaMessage('');
+    try {
+      const response = await fetch(`/focus/media/${encodeURIComponent(entry.id)}`, {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken, Accept: 'application/json' },
+        body: JSON.stringify({ title: editingMediaTitle.trim() }),
+      });
+      const data = await response.json() as { message?: string };
+      if (!response.ok) throw new Error(data.message || 'This name could not be saved.');
+      setEditingMediaId(null);
+      setMediaMessage('Name updated.');
+      onMediaChanged?.();
+    } catch (error) {
+      setMediaMessage(error instanceof Error ? error.message : 'This name could not be saved.');
+    } finally {
+      setMediaBusy(false);
+    }
+  };
+  const mediaUploadForm = (kind: 'audio' | 'video') => (
+    <form className="room-media-upload" onSubmit={(event) => { event.preventDefault(); void uploadMedia(kind); }}>
+      <label htmlFor={`room-media-file-${kind}`}>Add your own {kind}</label>
+      <input
+        id={`room-media-file-${kind}`}
+        type="file"
+        accept={kind === 'audio' ? 'audio/mpeg,audio/mp4,audio/aac,audio/wav,audio/ogg,audio/webm' : 'video/mp4,video/webm,video/quicktime'}
+        onChange={(event) => {
+          const nextFile = event.currentTarget.files?.[0] ?? null;
+          setMediaFile(nextFile);
+          setMediaTitle(nextFile?.name.replace(/\.[^.]+$/, '') ?? '');
+          setMediaMessage('');
+          event.currentTarget.value = '';
+        }}
+        disabled={mediaBusy}
+      />
+      {mediaFile && (
+        <>
+          <label htmlFor={`room-media-title-${kind}`}>Name</label>
+          <input
+            id={`room-media-title-${kind}`}
+            type="text"
+            value={mediaTitle}
+            maxLength={160}
+            onChange={(event) => setMediaTitle(event.currentTarget.value)}
+            disabled={mediaBusy}
+          />
+          <button type="submit" disabled={mediaBusy}>
+            {mediaBusy ? 'Saving…' : `Add ${kind}`}
+          </button>
+        </>
+      )}
+      {mediaMessage && <p role="status">{mediaMessage}</p>}
+      <small>Private to your account · up to 100 MB</small>
+    </form>
+  );
 
   return (
     <main ref={roomRef} className={`focus-room${hidden ? ' is-hidden' : ''}${reduceMotion ? ' is-reduced-motion' : ''}`} data-testid="focus-room">
@@ -1297,12 +1489,24 @@ export default function CurrentChunkPage({
                       <span className="room-media-swatch room-media-none" aria-hidden="true"><Image size={15} /></span><span>Still background · Chunked theme</span>
                     </button>
                     {usableMedia.filter((entry) => entry.kind === 'video' || entry.kind === 'image').map((entry) => (
-                      <button type="button" key={entry.id} className={`room-media-option${backgroundId === entry.id ? ' selected' : ''}`} aria-pressed={backgroundId === entry.id} onClick={() => selectBackground(entry)}>
-                        <span className="room-media-swatch" aria-hidden="true">{entry.thumbnailUrl && <img src={entry.thumbnailUrl} alt="" />}{entry.kind === 'video' ? 'MOV' : 'IMG'}</span>
-                        <span>{entry.title}<small>Room background</small></span>
-                      </button>
+                      <div className="room-media-row" key={entry.id}>
+                        <button type="button" className={`room-media-option${backgroundId === entry.id ? ' selected' : ''}`} aria-pressed={backgroundId === entry.id} onClick={() => selectBackground(entry)}>
+                          <span className="room-media-swatch" aria-hidden="true">{entry.thumbnailUrl && <img src={entry.thumbnailUrl} alt="" />}{entry.kind === 'video' ? 'MOV' : 'IMG'}</span>
+                          <span>{entry.title}<small>Room background</small></span>
+                        </button>
+                        {entry.owned && <button className="room-media-edit" type="button" disabled={mediaBusy} onClick={() => { setEditingMediaId(editingMediaId === entry.id ? null : entry.id); setEditingMediaTitle(entry.title); }} aria-label={`Rename ${entry.title}`}><Pencil size={14} /></button>}
+                        {entry.owned && <button className="room-media-remove" type="button" disabled={mediaBusy} onClick={() => void removeOwnMedia(entry)} aria-label={`Remove ${entry.title}`}><Trash2 size={14} /></button>}
+                        {editingMediaId === entry.id && (
+                          <form className="room-media-edit-form" onSubmit={(event) => void renameOwnMedia(event, entry)}>
+                            <label className="visually-hidden" htmlFor={`room-media-edit-${entry.id}`}>Media name</label>
+                            <input id={`room-media-edit-${entry.id}`} value={editingMediaTitle} maxLength={160} onChange={(event) => setEditingMediaTitle(event.currentTarget.value)} />
+                            <button type="submit" disabled={mediaBusy || !editingMediaTitle.trim()}>Save name</button>
+                          </form>
+                        )}
+                      </div>
                     ))}
                   </div>
+                  {mediaUploadForm('video')}
                   {selectedBackground && <button className="room-subtle-action" type="button" disabled={reduceMotion && (selectedBackground.kind === 'video' || animatedImage)} onClick={toggleBackground} data-testid="button-toggle-background">
                     {reduceMotion && (selectedBackground.kind === 'video' || animatedImage) ? 'Paused by Reduce motion' : backgroundPlaying ? 'Pause background' : 'Show background'}
                   </button>}
@@ -1338,13 +1542,26 @@ export default function CurrentChunkPage({
                     </label>
                   </fieldset>
 
+                  {mediaUploadForm('audio')}
+
                   {soundSource === 'library' && (
                     <>
                       <div className="room-sound-tracks" role="group" aria-label="Choose a library audio track">
                         {librarySounds.length ? librarySounds.map((entry) => (
-                          <button type="button" key={entry.id} className={`room-media-option${soundId === entry.id ? ' selected' : ''}`} aria-pressed={soundId === entry.id} onClick={() => selectSound(entry)}>
-                            <span className="room-media-swatch room-media-sound" aria-hidden="true"><Headphones size={15} /></span><span>{entry.title}</span>
-                          </button>
+                          <div className="room-media-row" key={entry.id}>
+                            <button type="button" className={`room-media-option${soundId === entry.id ? ' selected' : ''}`} aria-pressed={soundId === entry.id} onClick={() => selectSound(entry)}>
+                              <span className="room-media-swatch room-media-sound" aria-hidden="true"><Headphones size={15} /></span><span>{entry.title}</span>
+                            </button>
+                            {entry.owned && <button className="room-media-edit" type="button" disabled={mediaBusy} onClick={() => { setEditingMediaId(editingMediaId === entry.id ? null : entry.id); setEditingMediaTitle(entry.title); }} aria-label={`Rename ${entry.title}`}><Pencil size={14} /></button>}
+                            {entry.owned && <button className="room-media-remove" type="button" disabled={mediaBusy} onClick={() => void removeOwnMedia(entry)} aria-label={`Remove ${entry.title}`}><Trash2 size={14} /></button>}
+                            {editingMediaId === entry.id && (
+                              <form className="room-media-edit-form" onSubmit={(event) => void renameOwnMedia(event, entry)}>
+                                <label className="visually-hidden" htmlFor={`room-media-edit-${entry.id}`}>Media name</label>
+                                <input id={`room-media-edit-${entry.id}`} value={editingMediaTitle} maxLength={160} onChange={(event) => setEditingMediaTitle(event.currentTarget.value)} />
+                                <button type="submit" disabled={mediaBusy || !editingMediaTitle.trim()}>Save name</button>
+                              </form>
+                            )}
+                          </div>
                         )) : <p className="room-empty">No library tracks are available.</p>}
                       </div>
                       {soundId && !soundUrl && <p className="room-sound-note" role="status">Choose a valid saved audio track to play.</p>}

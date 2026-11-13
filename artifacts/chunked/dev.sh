@@ -31,6 +31,7 @@ export QUEUE_CONNECTION=sync
 export APP_ENV=local
 export APP_DEBUG=true
 export APP_URL="http://127.0.0.1:${PORT:-25067}"
+export ASSET_URL="${BASE_PATH:-/}"
 export APP_FORCE_HTTPS=true
 
 if [[ ! -f "$LARAVEL_DIR/.env" ]]; then

@@ -1,6 +1,7 @@
 const LOCAL_MEDIA_PREFIXES = [
   '/storage/focus-media/',
   '/api/storage/public-objects/focus-media/',
+  '/api/storage/focus-media/',
 ];
 
 function isSafeLocalMediaPath(value: string): boolean {

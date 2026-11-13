@@ -347,7 +347,6 @@ export default function CurrentChunkPage({
   const librarySounds = mediaCatalog.filter((entry) => entry.kind === 'audio' && validateDirectAudioUrl(entry.url));
   const hasVideoSound = selectedBackground?.kind === 'video';
   const hostedVideoAudio = soundSource === 'video' && selectedBackground?.kind === 'video';
-  const hasRoomMuteControl = (soundSource === 'library' && Boolean(soundUrl)) || hostedVideoAudio;
   const chunkRemaining = endAt === null ? null : Math.max(0, Math.ceil((endAt - now) / 1000));
   const progress = session.targetSeconds ? Math.min(100, Math.max(0, (session.progressSeconds + (session.active && !session.paused ? session.targetSeconds - session.progressSeconds - remaining : 0)) / session.targetSeconds * 100)) : 0;
 
@@ -1096,32 +1095,34 @@ export default function CurrentChunkPage({
           </header>
 
           <section className="room-center" aria-label="Current focus session">
-            <p className="room-overline">{session.phase === 'focus' ? 'A little focus' : 'A little pause'}</p>
-            <h1 className="room-timer" role="timer" aria-label={`${formatClock(remaining)} remaining`} data-testid="text-session-countdown">{formatClock(remaining)}</h1>
-            <div className="room-progress" role="progressbar" aria-label="Session progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress)}>
-              <span style={{ width: `${progress}%` }} />
+            <div className="room-timer-card">
+              <p className="room-overline">{session.phase === 'focus' ? 'A little focus' : 'A little pause'}</p>
+              <h1 className="room-timer" role="timer" aria-label={`${formatClock(remaining)} remaining`} data-testid="text-session-countdown">{formatClock(remaining)}</h1>
+              <div className="room-progress" role="progressbar" aria-label="Session progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress)}>
+                <span style={{ width: `${progress}%` }} />
+              </div>
+              <p className="room-invitation" aria-live="polite">
+                {partialSession ? 'This session ended with the chunk. It counts as partial.' : session.active && !session.paused ? 'You’re here. That is enough.' : session.paused ? 'Paused. Take the time you need.' : 'One manageable piece at a time.'}
+              </p>
+              <div className="room-main-controls">
+                <button
+                  type="button"
+                  className="room-start"
+                  onClick={toggleSession}
+                  disabled={!onTimerAction || (!session.active && !session.paused && (planExceedsChunk || session.status === 'completed' || session.status === 'boundary' || session.completedSessions >= session.plannedSessions))}
+                  data-testid="button-session-toggle"
+                >
+                  {session.active && !session.paused ? <><Pause size={17} /> Pause</> : <><Play size={17} fill="currentColor" />{session.paused ? 'Resume' : session.phase === 'break' ? 'Begin break' : 'Begin when ready'}</>}
+                </button>
+                {(session.active || session.paused || session.progressSeconds > 0) && (
+                  <button type="button" className="room-icon-control" onClick={resetSession} aria-label="Reset this session" data-testid="button-session-reset"><RotateCcw size={17} /></button>
+                )}
+                {session.phase === 'focus' && (session.active || session.paused) && (
+                  <button type="button" className="room-finish" onClick={finishSession} disabled={!onTimerAction} data-testid="button-session-finish">Finish</button>
+                )}
+              </div>
+              <p className="room-session-count" data-testid="text-session-count">{session.completedSessions} of {session.plannedSessions} sessions · {session.transitions === 'automatic' ? 'breaks included' : 'at your pace'}</p>
             </div>
-            <p className="room-invitation" aria-live="polite">
-              {partialSession ? 'This session ended with the chunk. It counts as partial.' : session.active && !session.paused ? 'You’re here. That is enough.' : session.paused ? 'Paused. Take the time you need.' : 'One manageable piece at a time.'}
-            </p>
-            <div className="room-main-controls">
-              <button
-                type="button"
-                className="room-start"
-                onClick={toggleSession}
-                disabled={!onTimerAction || (!session.active && !session.paused && (planExceedsChunk || session.status === 'completed' || session.status === 'boundary' || session.completedSessions >= session.plannedSessions))}
-                data-testid="button-session-toggle"
-              >
-                {session.active && !session.paused ? <><Pause size={17} /> Pause</> : <><Play size={17} fill="currentColor" />{session.paused ? 'Resume' : session.phase === 'break' ? 'Begin break' : 'Begin when ready'}</>}
-              </button>
-              {(session.active || session.paused || session.progressSeconds > 0) && (
-                <button type="button" className="room-icon-control" onClick={resetSession} aria-label="Reset this session" data-testid="button-session-reset"><RotateCcw size={17} /></button>
-              )}
-              {session.phase === 'focus' && (session.active || session.paused) && (
-                <button type="button" className="room-finish" onClick={finishSession} disabled={!onTimerAction} data-testid="button-session-finish">Finish</button>
-              )}
-            </div>
-            <p className="room-session-count" data-testid="text-session-count">{session.completedSessions} of {session.plannedSessions} sessions · {session.transitions === 'automatic' ? 'breaks included' : 'at your pace'}</p>
           </section>
 
           {panel && (
@@ -1428,20 +1429,6 @@ export default function CurrentChunkPage({
             <button type="button" className={panel === 'timer' ? 'active' : ''} aria-controls="focus-room-panel" aria-pressed={panel === 'timer'} onClick={(event) => { panelTriggerRef.current = event.currentTarget; setPanel(panel === 'timer' ? null : 'timer'); }} data-testid="button-open-timer"><Settings2 size={17} /><span>Timer settings</span></button>
             <button type="button" className={panel === 'background' ? 'active' : ''} aria-controls="focus-room-panel" aria-pressed={panel === 'background'} onClick={(event) => { panelTriggerRef.current = event.currentTarget; setPanel(panel === 'background' ? null : 'background'); }} data-testid="button-open-background"><Image size={17} /><span>Background</span></button>
             <button type="button" className={panel === 'sound' ? 'active' : ''} aria-controls="focus-room-panel" aria-pressed={panel === 'sound'} onClick={(event) => { panelTriggerRef.current = event.currentTarget; primeSessionCueAudio(); setPanel(panel === 'sound' ? null : 'sound'); }} data-testid="button-open-sound">{soundSource === 'silence' || muted ? <VolumeX size={17} /> : <Volume2 size={17} />}<span>Sound</span></button>
-            {hasRoomMuteControl && (
-              <button
-                type="button"
-                className={muted ? 'active' : ''}
-                onClick={changeMute}
-                aria-label={muted ? 'Unmute background sound' : 'Mute background sound'}
-                aria-pressed={muted}
-                title={muted ? 'Unmute background sound' : 'Mute background sound'}
-                data-testid="button-toggle-room-mute"
-              >
-                {muted ? <VolumeX size={17} /> : <Volume2 size={17} />}
-                <span>{muted ? 'Unmute' : 'Mute'}</span>
-              </button>
-            )}
             <button type="button" className={panel === 'history' ? 'active' : ''} aria-controls="focus-room-panel" aria-pressed={panel === 'history'} onClick={(event) => { panelTriggerRef.current = event.currentTarget; setPanel(panel === 'history' ? null : 'history'); }} data-testid="button-open-focus-history"><History size={17} /><span>History</span></button>
             <button type="button" onClick={() => { setPanel(null); setHidden(true); }} data-testid="button-hide-room"><X size={17} /><span>Hide</span></button>
           </nav>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   ArrowLeft, Check, ChevronLeft, ChevronRight, Clock3, Headphones, Image, ListTodo, Pause, Pencil,
-  History, Play, RotateCcw, Settings2, Trash2, Volume2, VolumeX, X,
+  History, Maximize2, Minimize2, Play, RotateCcw, Settings2, Trash2, Volume2, VolumeX, X,
 } from 'lucide-react';
 import { isVideoUrl, validateDirectAudioUrl, validateDirectVisualUrl } from './focusMedia';
 import { getFocusSessionCueEvents, type FocusSessionCueSnapshot } from './sessionCues';
@@ -292,6 +292,7 @@ export default function CurrentChunkPage({
   const [now, setNow] = useState(Date.now());
   const [panel, setPanel] = useState<Panel>(null);
   const [hidden, setHidden] = useState(false);
+  const [timerMinimized, setTimerMinimized] = useState(false);
   const [taskPage, setTaskPage] = useState(0);
   const [checklistDrafts, setChecklistDrafts] = useState<Record<string, string>>({});
   const [editingChecklistId, setEditingChecklistId] = useState<number | string | null>(null);
@@ -1287,35 +1288,60 @@ export default function CurrentChunkPage({
           </header>
 
           <section className="room-center" aria-label="Current focus session">
-            <div className="room-timer-card">
-              <p className="room-overline">{session.phase === 'focus' ? 'A little focus' : 'A little pause'}</p>
-              <h1 className="room-timer" role="timer" aria-label={`${formatClock(remaining)} remaining`} data-testid="text-session-countdown">{formatClock(remaining)}</h1>
-              <div className="room-progress" role="progressbar" aria-label="Session progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress)}>
-                <span style={{ width: `${progress}%` }} />
-              </div>
-              <p className="room-invitation" aria-live="polite">
-                {partialSession ? 'This session ended with the chunk. It counts as partial.' : session.active && !session.paused ? 'You’re here. That is enough.' : session.paused ? 'Paused. Take the time you need.' : 'One manageable piece at a time.'}
-              </p>
-              <div className="room-main-controls">
+            {!timerMinimized && (
+              <div className="room-timer-card">
                 <button
                   type="button"
-                  className="room-start"
-                  onClick={toggleSession}
-                  disabled={!onTimerAction || (!session.active && !session.paused && (planExceedsChunk || session.status === 'completed' || session.status === 'boundary' || session.completedSessions >= session.plannedSessions))}
-                  data-testid="button-session-toggle"
+                  className="room-timer-minimize"
+                  onClick={() => setTimerMinimized(true)}
+                  aria-label="Minimize focus timer"
+                  title="Minimize timer"
+                  data-testid="button-minimize-focus-timer"
                 >
-                  {session.active && !session.paused ? <><Pause size={17} /> Pause</> : <><Play size={17} fill="currentColor" />{session.paused ? 'Resume' : session.phase === 'break' ? 'Begin break' : 'Begin when ready'}</>}
+                  <Minimize2 size={16} aria-hidden="true" />
                 </button>
-                {(session.active || session.paused || session.progressSeconds > 0) && (
-                  <button type="button" className="room-icon-control" onClick={resetSession} aria-label="Reset this session" data-testid="button-session-reset"><RotateCcw size={17} /></button>
-                )}
-                {session.phase === 'focus' && (session.active || session.paused) && (
-                  <button type="button" className="room-finish" onClick={finishSession} disabled={!onTimerAction} data-testid="button-session-finish">Finish</button>
-                )}
+                <p className="room-overline">{session.phase === 'focus' ? 'A little focus' : 'A little pause'}</p>
+                <h1 className="room-timer" role="timer" aria-label={`${formatClock(remaining)} remaining`} data-testid="text-session-countdown">{formatClock(remaining)}</h1>
+                <div className="room-progress" role="progressbar" aria-label="Session progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress)}>
+                  <span style={{ width: `${progress}%` }} />
+                </div>
+                <p className="room-invitation" aria-live="polite">
+                  {partialSession ? 'This session ended with the chunk. It counts as partial.' : session.active && !session.paused ? 'You’re here. That is enough.' : session.paused ? 'Paused. Take the time you need.' : 'One manageable piece at a time.'}
+                </p>
+                <div className="room-main-controls">
+                  <button
+                    type="button"
+                    className="room-start"
+                    onClick={toggleSession}
+                    disabled={!onTimerAction || (!session.active && !session.paused && (planExceedsChunk || session.status === 'completed' || session.status === 'boundary' || session.completedSessions >= session.plannedSessions))}
+                    data-testid="button-session-toggle"
+                  >
+                    {session.active && !session.paused ? <><Pause size={17} /> Pause</> : <><Play size={17} fill="currentColor" />{session.paused ? 'Resume' : session.phase === 'break' ? 'Begin break' : 'Begin when ready'}</>}
+                  </button>
+                  {(session.active || session.paused || session.progressSeconds > 0) && (
+                    <button type="button" className="room-icon-control" onClick={resetSession} aria-label="Reset this session" data-testid="button-session-reset"><RotateCcw size={17} /></button>
+                  )}
+                  {session.phase === 'focus' && (session.active || session.paused) && (
+                    <button type="button" className="room-finish" onClick={finishSession} disabled={!onTimerAction} data-testid="button-session-finish">Finish</button>
+                  )}
+                </div>
+                <p className="room-session-count" data-testid="text-session-count">{session.completedSessions} of {session.plannedSessions} sessions · {session.transitions === 'automatic' ? 'breaks included' : 'at your pace'}</p>
               </div>
-              <p className="room-session-count" data-testid="text-session-count">{session.completedSessions} of {session.plannedSessions} sessions · {session.transitions === 'automatic' ? 'breaks included' : 'at your pace'}</p>
-            </div>
+            )}
           </section>
+          {timerMinimized && (
+            <button
+              type="button"
+              className="room-timer-mini"
+              onClick={() => setTimerMinimized(false)}
+              aria-label={`Expand ${session.phase === 'focus' ? 'work session' : 'break timer'}, ${formatClock(remaining)} remaining`}
+              data-testid="button-expand-focus-timer"
+            >
+              <span className="room-timer-mini-label">{session.phase === 'focus' ? 'Work session' : 'Break time'}</span>
+              <strong className="room-timer-mini-time">{formatClock(remaining)}</strong>
+              <Maximize2 size={16} aria-hidden="true" />
+            </button>
+          )}
 
           {panel && (
             <section id="focus-room-panel" className={`room-panel room-panel-${panel}`} aria-labelledby="focus-room-panel-heading">

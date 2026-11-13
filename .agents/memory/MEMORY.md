@@ -2,3 +2,4 @@
 - [Laravel server environment](laravel-serve-environment.md) — pass workflow-injected MySQL and HTTPS settings into Artisan's PHP server child.
 - [Calm focus interface](calm-focus-interface.md) — keep Chunked's screens low-decision, theme-aware, and gently animated.
 - [Chunked's first audience](chunked-first-audience.md) — start with university students managing many interests who feel overwhelmed by rigid plans and long task lists.
+- [Chunked roadmap and terms](chunked-roadmap-and-terms.md) — deliver DAY, My Focus, habits, Insights, AI, then payments; defer unrelated features.

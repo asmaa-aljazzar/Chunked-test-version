@@ -2,16 +2,17 @@ import { createContext, useContext, useEffect, useMemo, useState, type Component
 import { Link as InertiaLink, router, useForm } from '@inertiajs/react';
 import {
   ArrowDownLeft, ArrowLeft, ArrowRight, ArrowUpRight, Check, CheckCircle2,
-  ChevronLeft, ChevronRight, Circle, Clock3, Coffee, Compass, Ellipsis, Menu,
+  ChevronLeft, ChevronRight, Circle, Clock3, Coffee, Compass, Ellipsis, Menu, Play,
   Moon, Plus, Settings2, SlidersHorizontal, Sun, Trash2, X,
 } from 'lucide-react';
+import CurrentChunkPage from './CurrentChunkPage';
 
 export type DayStructure = { type: string; name: string };
 export type Chunk = {
   id: number | string;
   name: string;
-  startTime?: string;
-  endTime?: string;
+  startTime?: string | null;
+  endTime?: string | null;
   sortOrder: number;
 };
 export type AffectedTask = {
@@ -42,6 +43,7 @@ export type UserSettings = {
 };
 export type ChunkedRoutes = Partial<{
   day: string;
+  focus: string;
   taskStore: string;
   taskUpdate: string;
   taskComplete: string;
@@ -62,6 +64,9 @@ export type ChunkedPageProps = {
   routes?: ChunkedRoutes;
   user?: { name?: string; email?: string };
   today?: string;
+  date?: string;
+  userKey?: string;
+  chunk?: Chunk;
   selectedChunkId?: Chunk['id'] | null;
   completedCount?: number;
   current?: { type: string; name: string; chunks?: { id?: number; name: string; startTime?: string | null; endTime?: string | null }[] } | null;
@@ -369,7 +374,10 @@ function DayPage() {
       <section className="fade-up-later mt-9">
         <div className="mb-4 flex items-end justify-between gap-4">
           <div><div className="mono mb-2 text-[10px] uppercase tracking-[.15em] text-muted">One thing at a time</div><h2 className="serif m-0 text-[29px] font-normal tracking-[-.02em]">In this part of your day</h2></div>
-          <button onClick={() => setShowAdd(true)} className="inline-flex items-center gap-2 rounded-full bg-[hsl(var(--primary))] px-4 py-2.5 text-xs font-semibold text-[hsl(var(--primary-foreground))] shadow-sm transition-transform hover:-translate-y-0.5" data-testid="button-add-task"><Plus size={15} /> Add a task</button>
+          <div className="flex items-center gap-2">
+            {focusChunk && <Link href={`${routes.focus || '/focus'}?date=${encodeURIComponent(today)}&chunk=${encodeURIComponent(String(focusChunk.id))}`} className="inline-flex items-center gap-2 rounded-full border border-soft px-4 py-2.5 text-xs font-semibold text-[hsl(var(--primary))] no-underline transition-colors hover:bg-[hsl(var(--muted))]" data-testid="link-focus-current-chunk"><Play size={14} /> Focus here</Link>}
+            <button onClick={() => setShowAdd(true)} className="inline-flex items-center gap-2 rounded-full bg-[hsl(var(--primary))] px-4 py-2.5 text-xs font-semibold text-[hsl(var(--primary-foreground))] shadow-sm transition-transform hover:-translate-y-0.5" data-testid="button-add-task"><Plus size={15} /> Add a task</button>
+          </div>
         </div>
         <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_290px]">
           <div className="surface min-h-[310px] rounded-[22px] border border-white/70 p-5 sm:p-7">
@@ -447,6 +455,44 @@ function DayPage() {
     </Overlay>}
     {toast && <div role="status" className="fixed bottom-5 left-1/2 z-[70] -translate-x-1/2 rounded-full bg-[#263f33] px-5 py-3 text-xs text-white shadow-lg">{toast}</div>}
   </AppShell>;
+}
+
+function FocusRoutePage() {
+  const props = useChunkedPage();
+  const [tasks, setTasks] = useState<Task[]>(props.tasks ?? []);
+  const routes = props.routes ?? {};
+  useEffect(() => setTasks(props.tasks ?? []), [props.tasks]);
+
+  const toggleTask = (task: Task) => {
+    const updated = { ...task, completedAt: task.completedAt ? null : new Date().toISOString() };
+    setTasks((current) => current.map((item) => item.id === task.id ? updated : item));
+    if (!routes.taskComplete) return;
+    router.patch(`${routes.taskComplete}/${task.id}/complete`, { completed: Boolean(updated.completedAt) }, {
+      preserveScroll: true,
+      onError: () => setTasks((current) => current.map((item) => item.id === task.id ? task : item)),
+    });
+  };
+
+  const chunk = props.chunk ?? props.chunks?.find((item) => String(item.id) === String(props.selectedChunkId));
+  const goBack = () => {
+    const date = props.today ?? props.date ?? dateKey();
+    const query = new URLSearchParams({ date });
+    if (chunk) query.set('chunk', String(chunk.id));
+    router.get(`${routes.day || '/day'}?${query.toString()}`);
+  };
+
+  if (!chunk) {
+    return <div className="grid min-h-[100dvh] place-items-center p-6 text-center"><div><p className="text-sm text-muted">There isn’t a day chunk to focus on yet.</p><Link href="/settings" className="text-sm font-semibold text-[hsl(var(--primary))]">Set up your day</Link></div></div>;
+  }
+
+  return <CurrentChunkPage
+    chunk={chunk}
+    tasks={tasks}
+    date={props.today ?? props.date ?? dateKey()}
+    userKey={props.userKey ?? props.user?.email ?? 'guest'}
+    onToggleTask={toggleTask}
+    onBack={goBack}
+  />;
 }
 
 function TaskRow({ task, compact = false, menuOpen, setMenuOpen, onToggle, onReview, onEdit }: {
@@ -767,13 +813,19 @@ function AuthPage({ mode }: { mode: 'login' | 'register' }) {
 export default function App(props: ChunkedPageProps = {}) {
   const url = window.location.pathname;
   const language = props.settings?.language || 'en';
+  const theme = props.settings?.theme || 'light';
   useEffect(() => {
     document.documentElement.lang = language;
     document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
   }, [language]);
+  useEffect(() => {
+    const systemDark = theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.classList.toggle('dark', theme === 'dark' || systemDark);
+  }, [theme]);
   let page: ReactNode = <DayPage key={`${props?.user?.email || 'day'}-${url}`} />;
   if (url === '/settings') page = <SettingsPage />;
   if (url === '/onboarding') page = <OnboardingPage />;
+  if (url === '/focus') page = <FocusRoutePage key={`focus-${props.userKey ?? props.user?.email ?? 'guest'}-${props.today ?? props.date ?? ''}-${props.chunk?.id ?? props.selectedChunkId ?? ''}`} />;
   if (url === '/login') page = <AuthPage mode="login" />;
   if (url === '/register') page = <AuthPage mode="register" />;
   return <PageContext.Provider value={props || {}}>{page}</PageContext.Provider>;

@@ -35,6 +35,7 @@ class HandleInertiaRequests extends Middleware
                 : null,
             'routes' => [
                 'day' => '/day',
+                'focus' => '/focus',
                 'taskStore' => '/tasks',
                 'taskUpdate' => '/tasks',
                 'taskComplete' => '/tasks',

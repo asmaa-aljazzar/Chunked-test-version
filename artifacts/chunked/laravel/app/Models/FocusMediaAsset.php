@@ -41,6 +41,13 @@ class FocusMediaAsset extends Model
             return null;
         }
 
+        if ($this->storage_disk === 'object_storage') {
+            return url('/api/storage/public-objects/'.implode(
+                '/',
+                array_map('rawurlencode', explode('/', ltrim($this->file_path, '/'))),
+            ));
+        }
+
         return Storage::disk($this->storage_disk ?: 'public')->url($this->file_path);
     }
 
@@ -48,6 +55,13 @@ class FocusMediaAsset extends Model
     {
         if (! $this->thumbnail_path) {
             return null;
+        }
+
+        if ($this->storage_disk === 'object_storage') {
+            return url('/api/storage/public-objects/'.implode(
+                '/',
+                array_map('rawurlencode', explode('/', ltrim($this->thumbnail_path, '/'))),
+            ));
         }
 
         return Storage::disk($this->storage_disk ?: 'public')->url($this->thumbnail_path);

@@ -97,7 +97,8 @@ class FocusController extends Controller
             ->orderBy('id')
             ->get()
             ->filter(fn (FocusMediaAsset $asset) => $asset->external_url
-                || ($asset->file_path && Storage::disk($asset->storage_disk ?: 'public')->exists($asset->file_path)))
+                || ($asset->file_path && ($asset->storage_disk === 'object_storage'
+                    || Storage::disk($asset->storage_disk ?: 'public')->exists($asset->file_path))))
             ->map(fn (FocusMediaAsset $asset) => [
                 'id' => (string) $asset->id,
                 'title' => $asset->title,

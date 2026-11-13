@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 use Database\Seeders\FocusMediaAssetSeeder;
@@ -15,9 +14,6 @@ class FocusRouteTest extends TestCase
 
     public function test_focus_route_opens_the_selected_chunk_and_only_its_tasks(): void
     {
-        Storage::fake('public');
-        Storage::disk('public')->put('focus-media/magical-moments.mp3', 'audio');
-        Storage::disk('public')->put('focus-media/teto-miku-halloween.mp4', 'video');
         $this->seed(FocusMediaAssetSeeder::class);
 
         $user = User::factory()->create();
@@ -72,7 +68,9 @@ class FocusRouteTest extends TestCase
                 ->where('tasks.0.title', 'Read one chapter')
                  ->has('mediaCatalog', 2)
                  ->where('mediaCatalog.0.kind', 'audio')
+                 ->where('mediaCatalog.0.url', url('/api/storage/public-objects/focus-media/magical-moments.mp3'))
                  ->where('mediaCatalog.1.kind', 'video')
+                 ->where('mediaCatalog.1.url', url('/api/storage/public-objects/focus-media/teto-miku-halloween.mp4'))
                 ->where('routes.focus', '/focus')
             );
     }

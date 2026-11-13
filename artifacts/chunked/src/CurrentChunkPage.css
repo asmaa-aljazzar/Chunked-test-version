@@ -363,6 +363,12 @@
   .room-center { min-height: 220px; padding: 1.2rem .75rem 5rem; }
   .room-timer { font-size: clamp(4.2rem, 19vw, 7.4rem); }
   .room-progress { margin: 1.2rem 0 .85rem; }
+  .room-parent-task { grid-template-columns: 2.75rem minmax(0, 1fr) auto; gap: .55rem; }
+  .room-parent-toggle { width: 2.75rem; height: 2.75rem; border-radius: .75rem; }
+  .room-check-item { grid-template-columns: 2.75rem minmax(0, 1fr) auto; gap: .45rem; padding-inline: .1rem; }
+  .room-check-item > input[type="checkbox"] { top: 50%; left: 0; width: 2.75rem; height: 2.75rem; transform: translateY(-50%); }
+  .room-check-box { justify-self: center; align-self: center; }
+  .room-task-pagination button { min-height: 2.75rem; padding-inline: .45rem; }
   .room-toolbar { bottom: max(.65rem, env(safe-area-inset-bottom)); width: calc(100% - 1rem); max-width: 580px; justify-content: space-between; gap: .12rem; padding: .28rem; border-radius: .95rem; }
   .room-toolbar button { min-width: 0; min-height: 3rem; flex-direction: column; gap: .15rem; padding: .38rem .15rem; font-size: .58rem; }
   .room-toolbar button svg { width: 17px; height: 17px; }

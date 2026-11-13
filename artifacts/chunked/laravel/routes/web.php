@@ -24,6 +24,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
     Route::get('/day', [DayController::class, 'index'])->name('day.index');
     Route::get('/focus', [FocusController::class, 'index'])->name('focus.index');
+    Route::get('/focus/history', [FocusController::class, 'history'])->name('focus.history');
     Route::post('/focus/media/upload-token', [FocusMediaController::class, 'uploadToken'])->name('focus.media.upload-token');
     Route::post('/focus/media', [FocusMediaController::class, 'store'])->name('focus.media.store');
     Route::post('/focus/media/{asset}/delete-token', [FocusMediaController::class, 'deleteToken'])->name('focus.media.delete-token');

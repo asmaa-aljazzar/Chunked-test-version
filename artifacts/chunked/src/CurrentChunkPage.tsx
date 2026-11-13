@@ -110,6 +110,8 @@ export type CurrentChunkPageProps = {
   nextChunk?: AvailableChunk | null;
   session?: Partial<FocusSessionState>;
   focusHistory?: FocusHistoryDay[];
+  focusHistoryFromDate?: string;
+  focusHistoryHasOlder?: boolean;
   nextSessionAutoStart?: { automaticMode: boolean; remainingTargetSeconds: number };
   mediaCatalog?: FocusMediaEntry[];
   selectedBackgroundId?: string | null;
@@ -269,7 +271,8 @@ function FocusHistorySessionCard({
 
 export default function CurrentChunkPage({
   chunk, tasks, date, onToggleTask, onBack, checklistItems = [], availableChunks = [], nextChunk = null,
-  session: sessionProps, focusHistory = [], nextSessionAutoStart, onTimerAction, onSaveFocusContext, onPlanSettingsChange,
+  session: sessionProps, focusHistory = [], focusHistoryFromDate, focusHistoryHasOlder = false,
+  nextSessionAutoStart, onTimerAction, onSaveFocusContext, onPlanSettingsChange,
   mediaCatalog = [], selectedBackgroundId = null, selectedSoundId = null, volume: initialVolume = 28,
   soundSource: initialSoundSource, sessionCues: initialSessionCues = { start: false, end: false },
   muted: initialMuted = false, reduceMotion: reduceMotionProp,
@@ -291,6 +294,11 @@ export default function CurrentChunkPage({
   const cueAudioContextRef = useRef<AudioContext | null>(null);
   const [now, setNow] = useState(Date.now());
   const [panel, setPanel] = useState<Panel>(null);
+  const [historyDays, setHistoryDays] = useState(focusHistory);
+  const [historyBeforeDate, setHistoryBeforeDate] = useState(focusHistoryFromDate ?? date);
+  const [historyHasOlder, setHistoryHasOlder] = useState(focusHistoryHasOlder);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState('');
   const [hidden, setHidden] = useState(false);
   const [timerMinimized, setTimerMinimized] = useState(false);
   const [taskPage, setTaskPage] = useState(0);
@@ -314,6 +322,45 @@ export default function CurrentChunkPage({
   const leaveTriggerRef = useRef<HTMLElement | null>(null);
   const panelCloseRef = useRef<HTMLButtonElement>(null);
   const panelTriggerRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    setHistoryDays(focusHistory);
+    setHistoryBeforeDate(focusHistoryFromDate ?? date);
+    setHistoryHasOlder(focusHistoryHasOlder);
+    setHistoryError('');
+  }, [date, focusHistory, focusHistoryFromDate, focusHistoryHasOlder]);
+
+  const loadOlderFocusHistory = useCallback(async () => {
+    if (!historyHasOlder || historyLoading || !historyBeforeDate) return;
+
+    setHistoryLoading(true);
+    setHistoryError('');
+    try {
+      const response = await fetch(`/focus/history?before=${encodeURIComponent(historyBeforeDate)}`, {
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) throw new Error('History request failed');
+      const result = await response.json() as {
+        focusHistory?: FocusHistoryDay[];
+        fromDate?: string;
+        hasOlder?: boolean;
+      };
+      if (!Array.isArray(result.focusHistory) || !result.fromDate) {
+        throw new Error('History response was incomplete');
+      }
+
+      setHistoryDays((current) => {
+        const daysByDate = new Map(current.map((day) => [day.date, day]));
+        result.focusHistory?.forEach((day) => daysByDate.set(day.date, day));
+        return [...daysByDate.values()].sort((first, second) => second.date.localeCompare(first.date));
+      });
+      setHistoryBeforeDate(result.fromDate);
+      setHistoryHasOlder(Boolean(result.hasOlder));
+    } catch {
+      setHistoryError('Could not load earlier focus history. Try again.');
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [historyBeforeDate, historyHasOlder, historyLoading]);
   const initialBackground = mediaCatalog.find((entry) => (
     entry.id === selectedBackgroundId && (entry.kind === 'video' || entry.kind === 'image')
   )) ?? null;
@@ -1355,12 +1402,14 @@ export default function CurrentChunkPage({
 
               {panel === 'history' && (
                 <div className="room-panel-content room-history-content" data-testid="section-focus-history">
-                  <p className="room-panel-note">A gentle look at the last 30 days. Time reflects focus recorded for each session; notes are yours to add or leave blank.</p>
-                  {focusHistory.length === 0 ? (
-                    <p className="room-empty" data-testid="text-focus-history-empty">Your focus history will appear here when you start a session.</p>
+                  <p className="room-panel-note">Recent focus starts with the last 30 days. Earlier sessions load in 30-day ranges; time reflects each session, and notes are yours to add or leave blank.</p>
+                  {historyDays.length === 0 ? (
+                    <p className="room-empty" data-testid="text-focus-history-empty">
+                      {historyHasOlder ? 'No sessions in this range. You can still look farther back.' : 'Your focus history will appear here when you start a session.'}
+                    </p>
                   ) : (
                     <div className="room-history-days">
-                      {focusHistory.map((day) => (
+                      {historyDays.map((day) => (
                         <section className="room-history-day" key={day.date} data-testid={`section-focus-day-${day.date}`}>
                           <header>
                             <h3>{new Intl.DateTimeFormat('en', { weekday: 'long', month: 'short', day: 'numeric' }).format(new Date(`${day.date}T12:00:00`))}</h3>
@@ -1381,6 +1430,18 @@ export default function CurrentChunkPage({
                         </section>
                       ))}
                     </div>
+                  )}
+                  {historyError && <p className="room-history-load-error" role="alert" data-testid="text-focus-history-error">{historyError}</p>}
+                  {historyHasOlder && (
+                    <button
+                      type="button"
+                      className="room-history-load-more"
+                      onClick={loadOlderFocusHistory}
+                      disabled={historyLoading}
+                      data-testid="button-load-older-focus-history"
+                    >
+                      {historyLoading ? 'Loading earlier sessions…' : 'Load earlier sessions'}
+                    </button>
                   )}
                 </div>
               )}

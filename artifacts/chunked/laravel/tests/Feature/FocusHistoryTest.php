@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\FocusPlan;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -67,6 +68,35 @@ class FocusHistoryTest extends TestCase
             ]);
         }
 
+        $olderDate = CarbonImmutable::parse($date, 'UTC')->subDays(40)->toDateString();
+        $olderPlan = $user->focusPlans()->create([
+            'uuid' => (string) Str::uuid(),
+            'planned_date' => $olderDate,
+            'current_chunk_id' => $morning->id,
+            'current_chunk_name_snapshot' => $morning->name,
+            'focus_minutes' => 25,
+            'break_minutes' => 5,
+            'planned_sessions' => 1,
+            'transition_mode' => 'manual',
+            'phase' => 'focus',
+            'status' => 'ready',
+            'phase_remaining_seconds' => 1500,
+        ]);
+        $olderPlan->sessions()->create([
+            'session_key' => (string) Str::uuid(),
+            'user_id' => $user->id,
+            'chunk_id' => $morning->id,
+            'chunk_name_snapshot' => $morning->name,
+            'planned_date' => $olderDate,
+            'session_number' => 1,
+            'status' => 'completed',
+            'planned_seconds' => 1500,
+            'focused_seconds' => 900,
+            'remaining_seconds' => 0,
+            'started_at' => CarbonImmutable::parse($olderDate, 'UTC')->startOfDay(),
+            'ended_at' => CarbonImmutable::parse($olderDate, 'UTC')->startOfDay()->addMinutes(25),
+        ]);
+
         $this->actingAs($user)
             ->get(route('focus.index', ['date' => $date, 'chunk' => $morning->id]))
             ->assertOk()
@@ -81,7 +111,20 @@ class FocusHistoryTest extends TestCase
                 ->where('focusHistory.0.chunks.1.sessions.0.contextNote', 'A pause helped')
                 ->where('focusHistory.0.chunks.1.sessions.0.status', 'completed')
                 ->where('focusHistory.0.chunks.1.sessions.1.status', 'partial')
+                ->where('focusHistoryFromDate', CarbonImmutable::parse($date, 'UTC')->subDays(29)->toDateString())
+                ->where('focusHistoryHasOlder', true)
             );
+
+        $this->actingAs($user)
+            ->getJson(route('focus.history', [
+                'before' => CarbonImmutable::parse($date, 'UTC')->subDays(29)->toDateString(),
+            ]))
+            ->assertOk()
+            ->assertJsonPath('fromDate', CarbonImmutable::parse($date, 'UTC')->subDays(59)->toDateString())
+            ->assertJsonPath('toDate', CarbonImmutable::parse($date, 'UTC')->subDays(30)->toDateString())
+            ->assertJsonPath('focusHistory.0.date', $olderDate)
+            ->assertJsonPath('focusHistory.0.focusedSeconds', 900)
+            ->assertJsonPath('focusHistory.0.chunks.0.focusedSeconds', 900);
     }
 
     public function test_users_can_save_or_clear_context_only_on_their_own_focus_sessions(): void

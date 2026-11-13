@@ -87,6 +87,8 @@ export type ChunkedPageProps = {
   focusPlanId?: number;
   session?: Partial<FocusSessionState>;
   focusHistory?: FocusHistoryDay[];
+  focusHistoryFromDate?: string;
+  focusHistoryHasOlder?: boolean;
   checklistItems?: CurrentChunkChecklistItem[];
   availableChunks?: AvailableChunk[];
   nextChunk?: AvailableChunk | null;
@@ -676,6 +678,8 @@ function FocusRoutePage() {
     nextChunk={props.nextChunk ?? null}
     session={props.session}
     focusHistory={props.focusHistory ?? []}
+    focusHistoryFromDate={props.focusHistoryFromDate}
+    focusHistoryHasOlder={props.focusHistoryHasOlder}
     nextSessionAutoStart={props.session ? {
       automaticMode: props.session.transitions === 'automatic',
       remainingTargetSeconds: props.session.remainingPlanSeconds ?? 0,

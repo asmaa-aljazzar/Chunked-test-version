@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Chunk;
 use Carbon\CarbonImmutable;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -111,11 +112,15 @@ class FocusController extends Controller
             ->filter(fn (array $asset) => is_string($asset['url']) && $asset['url'] !== '')
             ->values();
         $timerState = $focusPlans->state($plan);
+        $historyFromDate = CarbonImmutable::parse($date, $timezone)->subDays(29)->toDateString();
         $focusHistory = $focusPlans->history(
             $user,
-            CarbonImmutable::parse($date, $timezone)->subDays(29)->toDateString(),
+            $historyFromDate,
             $date,
         );
+        $focusHistoryHasOlder = $user->focusSessions()
+            ->where('planned_date', '<', $historyFromDate)
+            ->exists();
 
         return Inertia::render('App', [
             'date' => $date,
@@ -141,6 +146,8 @@ class FocusController extends Controller
             'focusPlanId' => $plan->id,
             'session' => $timerState,
             'focusHistory' => $focusHistory,
+            'focusHistoryFromDate' => $historyFromDate,
+            'focusHistoryHasOlder' => $focusHistoryHasOlder,
             'nextSessionAutoStart' => [
                 'automaticMode' => $plan->transition_mode === 'automatic',
                 'remainingTargetSeconds' => $timerState['remainingPlanSeconds'],
@@ -169,6 +176,26 @@ class FocusController extends Controller
                 'navigationPosition' => $settings->navigation_position,
                 'timezone' => $timezone,
             ],
+        ]);
+    }
+
+    public function history(Request $request, FocusPlanService $focusPlans): JsonResponse
+    {
+        $validated = Validator::make($request->query(), [
+            'before' => ['required', 'date_format:Y-m-d'],
+        ])->validate();
+
+        $toDate = CarbonImmutable::parse($validated['before'], 'UTC')->subDay();
+        $fromDate = $toDate->subDays(29);
+        $user = $request->user();
+
+        return response()->json([
+            'focusHistory' => $focusPlans->history($user, $fromDate->toDateString(), $toDate->toDateString()),
+            'fromDate' => $fromDate->toDateString(),
+            'toDate' => $toDate->toDateString(),
+            'hasOlder' => $user->focusSessions()
+                ->where('planned_date', '<', $fromDate->toDateString())
+                ->exists(),
         ]);
     }
 

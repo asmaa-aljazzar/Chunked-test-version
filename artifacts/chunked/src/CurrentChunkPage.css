@@ -249,6 +249,11 @@
 .room-empty { margin: 1rem 0; color: #c6cdbf; font-size: .78rem; }
 .room-history-content { display: grid; gap: .85rem; }
 .room-history-days { display: grid; gap: .8rem; }
+.room-history-load-more { width: 100%; min-height: 2.5rem; border: 1px solid rgba(209, 225, 199, .35); border-radius: .65rem; padding: .55rem .75rem; color: #e2ebdb; background: rgba(197, 216, 185, .1); font: inherit; font-size: .68rem; cursor: pointer; }
+.room-history-load-more:hover:not(:disabled) { background: rgba(197, 216, 185, .17); }
+.room-history-load-more:disabled { opacity: .6; cursor: progress; }
+.room-history-load-more:focus-visible { outline: 2px solid #c4d7b8; outline-offset: 2px; }
+.room-history-load-error { margin: 0; color: #f0c4b8; font-size: .68rem; }
 .room-history-day { border-top: 1px solid rgba(238, 237, 224, .13); padding-top: .7rem; }
 .room-history-day > header, .room-history-chunk > header { display: flex; align-items: baseline; justify-content: space-between; gap: .7rem; }
 .room-history-day > header h3, .room-history-chunk > header h4 { margin: 0; color: #f2f0e5; font-size: .78rem; font-weight: 600; }
